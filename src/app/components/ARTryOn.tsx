@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Hands, Results } from "@mediapipe/hands";
 import { Camera } from "@mediapipe/camera_utils";
-import { X, Camera as CameraIcon, RotateCcw, Download } from "lucide-react";
+import {
+  X,
+  Camera as CameraIcon,
+  RotateCcw,
+  Download,
+} from "lucide-react";
 
 interface ARTryOnProps {
   watchImage: string;
@@ -9,28 +14,80 @@ interface ARTryOnProps {
   onClose: () => void;
 }
 
-export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
+export function ARTryOn({
+  watchImage,
+  watchName,
+  onClose,
+}: ARTryOnProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [handDetected, setHandDetected] = useState(false);
-  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  const [facingMode, setFacingMode] = useState<
+    "user" | "environment"
+  >("user");
   const cameraRef = useRef<Camera | null>(null);
   const handsRef = useRef<Hands | null>(null);
   const watchImgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
-    // Preload watch image
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = watchImage;
-    img.onload = () => {
-      watchImgRef.current = img;
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    const loadWatchImage = async () => {
+      const img = new Image();
+
+      const finalize = (src: string, crossOrigin?: string) => {
+        if (crossOrigin) img.crossOrigin = crossOrigin;
+        img.src = src;
+        img.onload = () => {
+          if (!cancelled) watchImgRef.current = img;
+        };
+        img.onerror = () => {
+          // Silently fail – watch just won't render on canvas
+          console.warn(
+            "ARTryOn: watch image failed to load",
+            src,
+          );
+        };
+      };
+
+      // blob: / data: URLs are same-origin — load directly without crossOrigin
+      if (
+        watchImage.startsWith("blob:") ||
+        watchImage.startsWith("data:")
+      ) {
+        finalize(watchImage);
+        return;
+      }
+
+      // Remote URL: fetch → blob → objectURL
+      // This bypasses the browser cache CORS issue where <img> previously
+      // loaded the same URL without crossOrigin, poisoning the cache.
+      try {
+        const res = await fetch(watchImage, { mode: "cors" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) finalize(objectUrl);
+      } catch (fetchErr) {
+        console.warn(
+          "ARTryOn: fetch failed, trying direct img load",
+          fetchErr,
+        );
+        // Last resort: add cache-busting param so browser doesn't reuse CORS-less cache
+        const bust = `${watchImage}${watchImage.includes("?") ? "&" : "?"}_cb=${Date.now()}`;
+        if (!cancelled) finalize(bust, "anonymous");
+      }
     };
 
+    loadWatchImage();
+
     return () => {
+      cancelled = true;
       watchImgRef.current = null;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [watchImage]);
 
@@ -66,7 +123,9 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
         const camera = new Camera(videoRef.current, {
           onFrame: async () => {
             if (videoRef.current && handsRef.current) {
-              await handsRef.current.send({ image: videoRef.current });
+              await handsRef.current.send({
+                image: videoRef.current,
+              });
             }
           },
           facingMode: facingMode,
@@ -83,7 +142,9 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
       } catch (err) {
         console.error("AR initialization error:", err);
         if (mounted) {
-          setError("Không thể khởi động camera. Vui lòng cho phép truy cập camera.");
+          setError(
+            "Không thể khởi động camera. Vui lòng cho phép truy cập camera.",
+          );
           setIsLoading(false);
         }
       }
@@ -103,7 +164,7 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
   }, [facingMode]);
 
   const onResults = (results: Results) => {
-    if (!canvasRef.current || !videoRef.current || !watchImgRef.current) return;
+    if (!canvasRef.current || !videoRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
@@ -116,13 +177,26 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
     // Draw video frame
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(
+      results.image,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
 
     // Draw hand landmarks and watch
-    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    if (
+      results.multiHandLandmarks &&
+      results.multiHandLandmarks.length > 0
+    ) {
       setHandDetected(true);
 
-      for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+      for (
+        let i = 0;
+        i < results.multiHandLandmarks.length;
+        i++
+      ) {
         const landmarks = results.multiHandLandmarks[i];
         const handedness = results.multiHandedness?.[i];
 
@@ -137,8 +211,10 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
         const wristY = wrist.y * canvas.height;
 
         // Calculate distance between wrist and middle finger base for sizing
-        const dx = (middleFingerBase.x - wrist.x) * canvas.width;
-        const dy = (middleFingerBase.y - wrist.y) * canvas.height;
+        const dx =
+          (middleFingerBase.x - wrist.x) * canvas.width;
+        const dy =
+          (middleFingerBase.y - wrist.y) * canvas.height;
         const handSize = Math.sqrt(dx * dx + dy * dy);
 
         // Watch size based on hand size
@@ -147,30 +223,33 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
         // Calculate rotation angle
         const angle = Math.atan2(dy, dx);
 
-        // Draw watch
-        ctx.save();
-        ctx.translate(wristX, wristY);
-        ctx.rotate(angle + Math.PI / 2);
+        // Draw watch only if image is ready
+        if (watchImgRef.current) {
+          ctx.save();
+          ctx.translate(wristX, wristY);
+          ctx.rotate(angle + Math.PI / 2);
 
-        // Draw watch shadow for depth
-        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-        ctx.shadowBlur = 10;
-        ctx.shadowOffsetX = 5;
-        ctx.shadowOffsetY = 5;
+          // Draw watch shadow for depth
+          ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+          ctx.shadowBlur = 10;
+          ctx.shadowOffsetX = 5;
+          ctx.shadowOffsetY = 5;
 
-        // Draw watch image
-        ctx.drawImage(
-          watchImgRef.current,
-          -watchSize / 2,
-          -watchSize / 2,
-          watchSize,
-          watchSize
-        );
+          // Draw watch image
+          ctx.drawImage(
+            watchImgRef.current,
+            -watchSize / 2,
+            -watchSize / 2,
+            watchSize,
+            watchSize,
+          );
 
-        ctx.restore();
+          ctx.restore();
+        }
 
-        // Draw wrist landmark for reference (optional - can be removed)
-        ctx.fillStyle = handedness?.label === "Left" ? "#C4964A" : "#C4964A";
+        // Draw wrist landmark for reference
+        ctx.fillStyle =
+          handedness?.label === "Left" ? "#C4964A" : "#C4964A";
         ctx.beginPath();
         ctx.arc(wristX, wristY, 5, 0, 2 * Math.PI);
         ctx.fill();
@@ -183,12 +262,13 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
   };
 
   const handleFlipCamera = () => {
-    setFacingMode(prev => prev === "user" ? "environment" : "user");
+    setFacingMode((prev) =>
+      prev === "user" ? "environment" : "user",
+    );
   };
 
   const handleCapture = () => {
     if (!canvasRef.current) return;
-
     const link = document.createElement("a");
     link.download = `${watchName}-AR-try-on.png`;
     link.href = canvasRef.current.toDataURL("image/png");
@@ -201,8 +281,15 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
       <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-[#0A0A0A]/90 to-transparent p-4">
         <div className="flex items-center justify-between max-w-[1440px] mx-auto">
           <div>
-            <p className="text-[#C4964A] text-[9px] tracking-[0.25em] uppercase">AR Try-On</p>
-            <p className="text-white text-sm" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+            <p className="text-[#C4964A] text-[9px] tracking-[0.25em] uppercase">
+              AR Try-On
+            </p>
+            <p
+              className="text-white text-sm"
+              style={{
+                fontFamily: "'Cormorant Garamond', serif",
+              }}
+            >
               {watchName}
             </p>
           </div>
@@ -217,11 +304,7 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
 
       {/* Camera View */}
       <div className="flex-1 relative flex items-center justify-center bg-black">
-        <video
-          ref={videoRef}
-          className="hidden"
-          playsInline
-        />
+        <video ref={videoRef} className="hidden" playsInline />
         <canvas
           ref={canvasRef}
           className="max-w-full max-h-full object-contain"
@@ -232,7 +315,9 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
           <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/80">
             <div className="text-center">
               <div className="w-16 h-16 border-4 border-[#C4964A] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-white/60 text-xs tracking-[0.15em]">Đang khởi động camera...</p>
+              <p className="text-white/60 text-xs tracking-[0.15em]">
+                Đang khởi động camera...
+              </p>
             </div>
           </div>
         )}
@@ -241,8 +326,13 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/90">
             <div className="text-center max-w-md px-6">
-              <CameraIcon size={48} className="text-white/20 mx-auto mb-4" />
-              <p className="text-white/60 text-sm mb-6">{error}</p>
+              <CameraIcon
+                size={48}
+                className="text-white/20 mx-auto mb-4"
+              />
+              <p className="text-white/60 text-sm mb-6">
+                {error}
+              </p>
               <button
                 onClick={onClose}
                 className="bg-[#C4964A] text-black px-8 py-3 text-xs tracking-[0.2em] uppercase hover:bg-[#d4a85a] transition-all duration-300"
@@ -257,9 +347,13 @@ export function ARTryOn({ watchImage, watchName, onClose }: ARTryOnProps) {
         {!isLoading && !error && (
           <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-[#0A0A0A]/70 px-4 py-2 rounded-full">
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${handDetected ? "bg-green-500" : "bg-red-500"} animate-pulse`} />
+              <div
+                className={`w-2 h-2 rounded-full ${handDetected ? "bg-green-500" : "bg-red-500"} animate-pulse`}
+              />
               <p className="text-white/80 text-[10px] tracking-wide">
-                {handDetected ? "Đã phát hiện tay" : "Đưa tay vào khung hình"}
+                {handDetected
+                  ? "Đã phát hiện tay"
+                  : "Đưa tay vào khung hình"}
               </p>
             </div>
           </div>
