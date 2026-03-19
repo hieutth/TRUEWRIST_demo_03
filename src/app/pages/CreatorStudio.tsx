@@ -1,26 +1,69 @@
 import { useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router";
 import {
-  Upload, X, RotateCcw, CheckCircle2, RefreshCw,
-  Sparkles, Download, AlertTriangle, AlertCircle,
-  ChevronRight, Save, Eye,
+  Upload,
+  X,
+  RotateCcw,
+  CheckCircle2,
+  RefreshCw,
+  Sparkles,
+  Download,
+  AlertTriangle,
+  AlertCircle,
+  ChevronRight,
+  Save,
+  Eye,
 } from "lucide-react";
-import { useWatchStore, CustomWatch } from "../context/WatchStore";
+import {
+  useWatchStore,
+  CustomWatch,
+} from "../context/WatchStore";
 import { ARTryOn } from "../components/ARTryOn";
 
 /* ─── Gemini config ─────────────────────────────────────── */
-const GEMINI_API_KEY  = "AIzaSyDyie__bkKBtp-Xs-tYwJhvcBZsKujIUr4";
-const GEMINI_MODEL    = "gemini-2.0-flash-exp";
+const GEMINI_API_KEY =
+  "AIzaSyDyie__bkKBtp-Xs-tYwJhvcBZsKujIUr4";
+const GEMINI_MODEL = "gemini-1.5-flash";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 /* ─── Angle slots ───────────────────────────────────────── */
 const ANGLE_SLOTS = [
-  { key: "front",   label: "Mặt trước",    hint: "Góc nhìn thẳng",    required: true  },
-  { key: "left34",  label: "3/4 Trái",     hint: "Nghiêng ~45°",      required: false },
-  { key: "left",    label: "Mặt bên trái", hint: "Góc 90°",           required: false },
-  { key: "right34", label: "3/4 Phải",     hint: "Nghiêng ~45°",      required: false },
-  { key: "right",   label: "Mặt bên phải", hint: "Góc 90°",           required: false },
-  { key: "back",    label: "Mặt sau",      hint: "Phía sau đồng hồ",  required: false },
+  {
+    key: "front",
+    label: "Mặt trước",
+    hint: "Góc nhìn thẳng",
+    required: true,
+  },
+  {
+    key: "left34",
+    label: "3/4 Trái",
+    hint: "Nghiêng ~45°",
+    required: false,
+  },
+  {
+    key: "left",
+    label: "Mặt bên trái",
+    hint: "Góc 90°",
+    required: false,
+  },
+  {
+    key: "right34",
+    label: "3/4 Phải",
+    hint: "Nghiêng ~45°",
+    required: false,
+  },
+  {
+    key: "right",
+    label: "Mặt bên phải",
+    hint: "Góc 90°",
+    required: false,
+  },
+  {
+    key: "back",
+    label: "Mặt sau",
+    hint: "Phía sau đồng hồ",
+    required: false,
+  },
 ] as const;
 type SlotKey = (typeof ANGLE_SLOTS)[number]["key"];
 
@@ -33,12 +76,27 @@ const AI_STEPS = [
   "Hoàn thiện ảnh 3D...",
 ];
 
-const STRAP_OPTIONS = ["Leather", "Metal", "Rubber", "NATO", "Fabric"];
-const TAG_OPTIONS   = ["New", "Hot", "Limited", "Exclusive", "Bestseller", "Custom"];
+const STRAP_OPTIONS = [
+  "Leather",
+  "Metal",
+  "Rubber",
+  "NATO",
+  "Fabric",
+];
+const TAG_OPTIONS = [
+  "New",
+  "Hot",
+  "Limited",
+  "Exclusive",
+  "Bestseller",
+  "Custom",
+];
 
 /* ─── Gemini helpers ────────────────────────────────────── */
-async function blobUrlToBase64(url: string): Promise<{ data: string; mimeType: string }> {
-  const res  = await fetch(url);
+async function blobUrlToBase64(
+  url: string,
+): Promise<{ data: string; mimeType: string }> {
+  const res = await fetch(url);
   const blob = await res.blob();
   const mime = blob.type || "image/jpeg";
   return new Promise((resolve, reject) => {
@@ -52,61 +110,114 @@ async function blobUrlToBase64(url: string): Promise<{ data: string; mimeType: s
   });
 }
 
-async function callGemini(slots: Partial<Record<SlotKey, string>>): Promise<string> {
-  const prompt = `You are a professional luxury watch product photographer and 3D artist.
-I will provide ${Object.keys(slots).length} reference photo(s) of a real wristwatch from different angles.
+/** Step 1: Gemini analyzes the watch image → returns detailed text description */
+async function analyzeWatchWithGemini(
+  slots: Partial<Record<SlotKey, string>>,
+): Promise<string> {
+  const frontUrl = slots["front"] || Object.values(slots)[0];
+  if (!frontUrl) throw new Error("Không có ảnh để phân tích.");
 
-Generate ONE photorealistic 3D product render of this watch with:
-- Pure deep black background
-- Dramatic directional studio lighting from upper-left
-- Subtle warm golden rim light on the right edge
-- Watch positioned at a heroic 35° angle, slightly elevated
-- Ultra-realistic metal case reflections and brushed/polished textures
-- Crystal-clear watch glass with realistic reflections
-- Visible dial details: indices, hands, subdials if any
-- Professional floating appearance with soft drop shadow below
-- Style similar to Omega, Rolex or IWC official product photography
-- High resolution, sharp details
+  const { data, mimeType } = await blobUrlToBase64(frontUrl);
 
-Output ONLY the rendered image, no background text or elements.`;
+  const prompt = `You are a luxury watch expert and product photographer.
+Analyze this wristwatch image in extreme detail and describe it for a photorealistic 3D product render prompt.
 
-  const parts: object[] = [{ text: prompt }];
-  for (const key of Object.keys(slots) as SlotKey[]) {
-    const url = slots[key];
-    if (!url) continue;
-    const slot = ANGLE_SLOTS.find((s) => s.key === key);
-    const { data, mimeType } = await blobUrlToBase64(url);
-    parts.push({ text: `Reference photo – ${slot?.label || key}:` });
-    parts.push({ inline_data: { mime_type: mimeType, data } });
-  }
+Describe:
+- Case shape (round/square/cushion/tonneau), material (steel/gold/titanium/ceramic), finish (polished/brushed/satin), approximate diameter
+- Bezel type (smooth/fluted/tachymeter/diamond/ceramic), color, finish
+- Dial color, texture, pattern (sunburst/guilloché/matte/metallic), applied indices vs printed, hour markers style
+- Hands style (dauphine/baton/alpha/sword), color, lume dots
+- Crown position and type, any pushers/complications
+- Crystal type appearance (flat/domed/sapphire glare)
+- Any subdials, complications, text/logo visible on dial
+- Strap/bracelet type, material, color, clasp style
+- Overall style (dress/sport/diver/pilot/racing)
+- Color palette: primary, secondary, accent colors with hex codes if possible
 
-  const res = await fetch(`${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-    }),
-  });
+Output ONLY a dense, comma-separated description optimized for image generation. No sentences. No markdown. Max 200 words.`;
+
+  const res = await fetch(
+    `${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: mimeType, data } },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 400,
+        },
+      }),
+    },
+  );
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    const msg = (err as { error?: { message?: string } })?.error?.message || `HTTP ${res.status}`;
+    const msg =
+      (err as { error?: { message?: string } })?.error
+        ?.message || `HTTP ${res.status}`;
     throw new Error(msg);
   }
 
-  const json = await res.json() as {
+  const json = (await res.json()) as {
     candidates?: Array<{
-      content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
+      content?: { parts?: Array<{ text?: string }> };
     }>;
   };
-  const part = json.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
-  if (!part?.inlineData?.data) throw new Error("Gemini không trả về ảnh. Hãy thử lại.");
-  return `data:${part.inlineData.mimeType || "image/png"};base64,${part.inlineData.data}`;
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text)
+    throw new Error("Gemini không trả về mô tả. Thử lại.");
+  return text.trim();
+}
+
+/** Step 2: Pollinations.ai generates photorealistic 3D render (free, no key needed) */
+async function generateRenderWithPollinations(
+  watchDescription: string,
+): Promise<string> {
+  const prompt = `luxury wristwatch professional product photography, photorealistic 3D render, ${watchDescription}, pure black background, dramatic studio lighting from upper left, warm golden rim light right edge, heroic 35 degree angle view, ultra-realistic metal reflections, brushed polished chrome textures, sapphire crystal glare, floating watch soft shadow below, Omega Rolex IWC official product photo style, 8k uhd sharp details, no text no watermark`;
+
+  const encoded = encodeURIComponent(prompt);
+  const seed = Math.floor(Math.random() * 99999);
+  const url = `https://image.pollinations.ai/prompt/${encoded}?width=768&height=768&nologo=true&seed=${seed}&model=flux`;
+
+  // Pollinations returns the image directly — we fetch it and convert to blob URL
+  const res = await fetch(url);
+  if (!res.ok)
+    throw new Error(
+      `Pollinations render thất bại: HTTP ${res.status}`,
+    );
+
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  return objectUrl;
+}
+
+/** Full pipeline: Gemini analyze → Pollinations render */
+async function callGemini(
+  slots: Partial<Record<SlotKey, string>>,
+): Promise<string> {
+  // Step 1: analyze
+  const description = await analyzeWatchWithGemini(slots);
+  // Step 2: render
+  const imageUrl =
+    await generateRenderWithPollinations(description);
+  return imageUrl;
 }
 
 /* ─── Step indicator ────────────────────────────────────── */
-const STUDIO_STEPS = ["Upload ảnh 2D", "AI Render 3D", "Thông tin mẫu", "Hoàn thành"];
+const STUDIO_STEPS = [
+  "Upload ảnh 2D",
+  "AI Render 3D",
+  "Thông tin mẫu",
+  "Hoàn thành",
+];
 
 function StepBar({ current }: { current: number }) {
   return (
@@ -114,18 +225,35 @@ function StepBar({ current }: { current: number }) {
       {STUDIO_STEPS.map((s, i) => (
         <div key={s} className="flex items-center">
           <div className="flex items-center gap-2 px-1">
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] flex-shrink-0 transition-all duration-300 ${
-              i < current  ? "bg-[#C4964A] text-black" :
-              i === current? "border-2 border-[#C4964A] text-[#C4964A]" :
-              "border border-white/20 text-white/25"
-            }`}>
+            <div
+              className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] flex-shrink-0 transition-all duration-300 ${
+                i < current
+                  ? "bg-[#C4964A] text-black"
+                  : i === current
+                    ? "border-2 border-[#C4964A] text-[#C4964A]"
+                    : "border border-white/20 text-white/25"
+              }`}
+            >
               {i < current ? <CheckCircle2 size={11} /> : i + 1}
             </div>
-            <span className={`text-[9px] tracking-[0.12em] uppercase whitespace-nowrap ${
-              i === current ? "text-[#C4964A]" : i < current ? "text-white/50" : "text-white/20"
-            }`}>{s}</span>
+            <span
+              className={`text-[9px] tracking-[0.12em] uppercase whitespace-nowrap ${
+                i === current
+                  ? "text-[#C4964A]"
+                  : i < current
+                    ? "text-white/50"
+                    : "text-white/20"
+              }`}
+            >
+              {s}
+            </span>
           </div>
-          {i < STUDIO_STEPS.length - 1 && <ChevronRight size={12} className="text-white/12 mx-2 flex-shrink-0" />}
+          {i < STUDIO_STEPS.length - 1 && (
+            <ChevronRight
+              size={12}
+              className="text-white/12 mx-2 flex-shrink-0"
+            />
+          )}
         </div>
       ))}
     </div>
@@ -134,26 +262,43 @@ function StepBar({ current }: { current: number }) {
 
 /* ─── Step 1: Upload ────────────────────────────────────── */
 function UploadStep({
-  images, onFile, onRemove, onNext,
+  images,
+  onFile,
+  onRemove,
+  onNext,
 }: {
   images: Partial<Record<SlotKey, string>>;
-  onFile: (key: SlotKey) => (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFile: (
+    key: SlotKey,
+  ) => (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemove: (key: SlotKey) => void;
   onNext: () => void;
 }) {
-  const fileRefs = useRef<Partial<Record<SlotKey, HTMLInputElement | null>>>({});
-  const count    = Object.keys(images).length;
+  const fileRefs = useRef<
+    Partial<Record<SlotKey, HTMLInputElement | null>>
+  >({});
+  const count = Object.keys(images).length;
   const hasFront = !!images["front"];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-5 gap-10">
       <div className="lg:col-span-3 space-y-6">
         <div>
-          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 400, fontSize: "1.6rem" }}
-            className="text-white mb-2">Upload ảnh đồng hồ</h2>
+          <h2
+            style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontWeight: 400,
+              fontSize: "1.6rem",
+            }}
+            className="text-white mb-2"
+          >
+            Upload ảnh đồng hồ
+          </h2>
           <p className="text-white/40 text-xs leading-relaxed">
-            Upload ảnh chụp thật từ nhiều góc độ. Gemini AI sẽ phân tích và render ra ảnh 3D
-            chất lượng studio. Tối thiểu cần ảnh <span className="text-white/70">mặt trước</span>.
+            Upload ảnh chụp thật từ nhiều góc độ. Gemini AI sẽ
+            phân tích và render ra ảnh 3D chất lượng studio. Tối
+            thiểu cần ảnh{" "}
+            <span className="text-white/70">mặt trước</span>.
           </p>
         </div>
 
@@ -162,43 +307,76 @@ function UploadStep({
           {ANGLE_SLOTS.map((slot) => {
             const img = images[slot.key];
             return (
-              <div key={slot.key} className="flex flex-col gap-1.5">
+              <div
+                key={slot.key}
+                className="flex flex-col gap-1.5"
+              >
                 <div className="flex items-center gap-1.5">
-                  <p className="text-white/55 text-[10px] tracking-[0.1em] uppercase">{slot.label}</p>
-                  {slot.required && <span className="text-[#C4964A] text-[8px]">*</span>}
+                  <p className="text-white/55 text-[10px] tracking-[0.1em] uppercase">
+                    {slot.label}
+                  </p>
+                  {slot.required && (
+                    <span className="text-[#C4964A] text-[8px]">
+                      *
+                    </span>
+                  )}
                 </div>
                 <div className="relative aspect-square bg-[#111111] border border-white/8 group overflow-hidden">
                   {img ? (
                     <>
-                      <img src={img} alt={slot.label} className="w-full h-full object-cover" />
+                      <img
+                        src={img}
+                        alt={slot.label}
+                        className="w-full h-full object-cover"
+                      />
                       <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center gap-2">
                         <button
-                          onClick={() => fileRefs.current[slot.key]?.click()}
+                          onClick={() =>
+                            fileRefs.current[slot.key]?.click()
+                          }
                           className="flex items-center gap-1 text-white/80 text-[9px] hover:text-[#C4964A] transition-colors"
-                        ><RefreshCw size={11} /> Thay</button>
+                        >
+                          <RefreshCw size={11} /> Thay
+                        </button>
                         <button
                           onClick={() => onRemove(slot.key)}
                           className="flex items-center gap-1 text-white/50 text-[9px] hover:text-red-400 transition-colors"
-                        ><X size={11} /> Xóa</button>
+                        >
+                          <X size={11} /> Xóa
+                        </button>
                       </div>
                       <div className="absolute top-1.5 right-1.5 bg-[#C4964A]/90 rounded-full p-0.5">
-                        <CheckCircle2 size={10} className="text-black" />
+                        <CheckCircle2
+                          size={10}
+                          className="text-black"
+                        />
                       </div>
                     </>
                   ) : (
                     <button
-                      onClick={() => fileRefs.current[slot.key]?.click()}
+                      onClick={() =>
+                        fileRefs.current[slot.key]?.click()
+                      }
                       className="w-full h-full flex flex-col items-center justify-center gap-2 hover:bg-white/3 transition-colors duration-200 group/btn"
                     >
                       <div className="w-9 h-9 border border-dashed border-white/15 group-hover/btn:border-[#C4964A]/40 flex items-center justify-center transition-colors duration-200">
-                        <Upload size={13} className="text-white/18 group-hover/btn:text-[#C4964A]/60 transition-colors duration-200" />
+                        <Upload
+                          size={13}
+                          className="text-white/18 group-hover/btn:text-[#C4964A]/60 transition-colors duration-200"
+                        />
                       </div>
-                      <p className="text-white/18 text-[9px]">{slot.hint}</p>
+                      <p className="text-white/18 text-[9px]">
+                        {slot.hint}
+                      </p>
                     </button>
                   )}
                   <input
-                    type="file" accept="image/*" className="hidden"
-                    ref={(el) => { fileRefs.current[slot.key] = el; }}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    ref={(el) => {
+                      fileRefs.current[slot.key] = el;
+                    }}
                     onChange={onFile(slot.key)}
                   />
                 </div>
@@ -210,13 +388,24 @@ function UploadStep({
         {/* Coverage */}
         <div>
           <div className="flex justify-between mb-1.5">
-            <p className="text-white/30 text-[9px] tracking-[0.15em] uppercase">Độ phủ góc</p>
-            <p className="text-[#C4964A] text-[9px]">{count}/{ANGLE_SLOTS.length}</p>
+            <p className="text-white/30 text-[9px] tracking-[0.15em] uppercase">
+              Độ phủ góc
+            </p>
+            <p className="text-[#C4964A] text-[9px]">
+              {count}/{ANGLE_SLOTS.length}
+            </p>
           </div>
           <div className="h-0.5 bg-white/8">
-            <div className="h-full bg-[#C4964A] transition-all duration-500" style={{ width: `${(count / ANGLE_SLOTS.length) * 100}%` }} />
+            <div
+              className="h-full bg-[#C4964A] transition-all duration-500"
+              style={{
+                width: `${(count / ANGLE_SLOTS.length) * 100}%`,
+              }}
+            />
           </div>
-          <p className="text-white/18 text-[9px] mt-1.5">Càng nhiều góc → AI render càng chính xác</p>
+          <p className="text-white/18 text-[9px] mt-1.5">
+            Càng nhiều góc → AI render càng chính xác
+          </p>
         </div>
 
         <button
@@ -237,7 +426,9 @@ function UploadStep({
       {/* Tips */}
       <div className="lg:col-span-2 space-y-5">
         <div className="bg-[#111111] border border-white/8 p-5 space-y-4">
-          <p className="text-white/40 text-[9px] tracking-[0.25em] uppercase">Mẹo chụp ảnh</p>
+          <p className="text-white/40 text-[9px] tracking-[0.25em] uppercase">
+            Mẹo chụp ảnh
+          </p>
           {[
             "Dùng nền trắng hoặc xám đồng nhất",
             "Ánh sáng tự nhiên hoặc đèn studio, tránh bóng cứng",
@@ -248,7 +439,9 @@ function UploadStep({
           ].map((t) => (
             <div key={t} className="flex gap-2.5 items-start">
               <div className="w-1 h-1 bg-[#C4964A] rounded-full mt-1.5 flex-shrink-0" />
-              <p className="text-white/38 text-[10px] leading-relaxed">{t}</p>
+              <p className="text-white/38 text-[10px] leading-relaxed">
+                {t}
+              </p>
             </div>
           ))}
         </div>
@@ -256,9 +449,14 @@ function UploadStep({
         <div className="border border-white/5 p-4">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-            <p className="text-white/40 text-[9px] font-mono">{GEMINI_MODEL}</p>
+            <p className="text-white/40 text-[9px] font-mono">
+              {GEMINI_MODEL}
+            </p>
           </div>
-          <p className="text-white/18 text-[9px]">Google DeepMind · Image Generation · Nhúng API sẵn có</p>
+          <p className="text-white/18 text-[9px]">
+            Google DeepMind · Image Generation · Nhúng API sẵn
+            có
+          </p>
         </div>
       </div>
     </div>
@@ -267,19 +465,23 @@ function UploadStep({
 
 /* ─── Step 2: AI Render ─────────────────────────────────── */
 function RenderStep({
-  images, onDone, onBack,
+  images,
+  onDone,
+  onBack,
 }: {
   images: Partial<Record<SlotKey, string>>;
   onDone: (img: string) => void;
   onBack: () => void;
 }) {
-  const [status, setStatus]   = useState<"idle" | "processing" | "done" | "error">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "processing" | "done" | "error"
+  >("idle");
   const [progress, setProgress] = useState(0);
-  const [stepIdx, setStepIdx]  = useState(0);
+  const [stepIdx, setStepIdx] = useState(0);
   const [stepLabel, setStepLabel] = useState("");
-  const [result, setResult]    = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [arOpen, setArOpen]    = useState(false);
+  const [arOpen, setArOpen] = useState(false);
   const processing = useRef(false);
 
   const run = useCallback(async () => {
@@ -298,7 +500,9 @@ function RenderStep({
       cur = Math.min(cur + 1, AI_STEPS.length - 2);
       setStepLabel(AI_STEPS[cur]);
       setStepIdx(cur);
-      setProgress(Math.round((cur / (AI_STEPS.length - 1)) * 80));
+      setProgress(
+        Math.round((cur / (AI_STEPS.length - 1)) * 80),
+      );
     }, 2600);
 
     try {
@@ -311,7 +515,9 @@ function RenderStep({
       setStatus("done");
     } catch (e: unknown) {
       clearInterval(interval);
-      setErrorMsg(e instanceof Error ? e.message : "Lỗi không xác định.");
+      setErrorMsg(
+        e instanceof Error ? e.message : "Lỗi không xác định.",
+      );
       setStatus("error");
     } finally {
       processing.current = false;
@@ -319,10 +525,18 @@ function RenderStep({
   }, [images]);
 
   // auto-start
-  useState(() => { run(); });
+  useState(() => {
+    run();
+  });
 
   if (arOpen && result) {
-    return <ARTryOn watchImage={result} watchName="Preview 3D" onClose={() => setArOpen(false)} />;
+    return (
+      <ARTryOn
+        watchImage={result}
+        watchName="Preview 3D"
+        onClose={() => setArOpen(false)}
+      />
+    );
   }
 
   const handleDownload = () => {
@@ -337,10 +551,19 @@ function RenderStep({
     <div className="grid grid-cols-1 lg:grid-cols-5 gap-10">
       <div className="lg:col-span-3 space-y-6">
         <div>
-          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 400, fontSize: "1.6rem" }}
-            className="text-white mb-2">Gemini AI Render</h2>
+          <h2
+            style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontWeight: 400,
+              fontSize: "1.6rem",
+            }}
+            className="text-white mb-2"
+          >
+            Gemini AI Render
+          </h2>
           <p className="text-white/40 text-xs leading-relaxed">
-            AI đang phân tích {Object.keys(images).length} ảnh tham chiếu và tái tạo mô hình 3D studio.
+            AI đang phân tích {Object.keys(images).length} ảnh
+            tham chiếu và tái tạo mô hình 3D studio.
           </p>
         </div>
 
@@ -349,12 +572,18 @@ function RenderStep({
           <div className="border border-white/8 bg-[#111111] p-6 space-y-5">
             <div className="flex items-center gap-3">
               <div className="w-5 h-5 border-2 border-[#C4964A] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-              <p className="text-white/60 text-xs">{stepLabel}</p>
+              <p className="text-white/60 text-xs">
+                {stepLabel}
+              </p>
             </div>
             <div>
               <div className="flex justify-between mb-2">
-                <p className="text-white/25 text-[9px]">Đang xử lý...</p>
-                <p className="text-[#C4964A] text-[9px]">{progress}%</p>
+                <p className="text-white/25 text-[9px]">
+                  Đang xử lý...
+                </p>
+                <p className="text-[#C4964A] text-[9px]">
+                  {progress}%
+                </p>
               </div>
               <div className="h-1 bg-white/8 w-full rounded-full overflow-hidden">
                 <div
@@ -365,21 +594,35 @@ function RenderStep({
             </div>
             <div className="grid grid-cols-2 gap-2">
               {AI_STEPS.map((s, i) => {
-                const done   = i < stepIdx;
+                const done = i < stepIdx;
                 const active = i === stepIdx;
                 return (
-                  <div key={s} className="flex items-center gap-1.5">
-                    {done ? <CheckCircle2 size={10} className="text-[#C4964A] flex-shrink-0" />
-                      : active ? <div className="w-2.5 h-2.5 border border-[#C4964A] rounded-full animate-pulse flex-shrink-0" />
-                      : <div className="w-2.5 h-2.5 border border-white/10 rounded-full flex-shrink-0" />}
-                    <p className={`text-[8px] truncate ${done ? "text-white/50" : active ? "text-[#C4964A]" : "text-white/15"}`}>
+                  <div
+                    key={s}
+                    className="flex items-center gap-1.5"
+                  >
+                    {done ? (
+                      <CheckCircle2
+                        size={10}
+                        className="text-[#C4964A] flex-shrink-0"
+                      />
+                    ) : active ? (
+                      <div className="w-2.5 h-2.5 border border-[#C4964A] rounded-full animate-pulse flex-shrink-0" />
+                    ) : (
+                      <div className="w-2.5 h-2.5 border border-white/10 rounded-full flex-shrink-0" />
+                    )}
+                    <p
+                      className={`text-[8px] truncate ${done ? "text-white/50" : active ? "text-[#C4964A]" : "text-white/15"}`}
+                    >
                       {s.replace("...", "")}
                     </p>
                   </div>
                 );
               })}
             </div>
-            <p className="text-white/15 text-[9px] text-center">Quá trình có thể mất 15–60 giây</p>
+            <p className="text-white/15 text-[9px] text-center">
+              Quá trình có thể mất 15–60 giây
+            </p>
           </div>
         )}
 
@@ -388,11 +631,18 @@ function RenderStep({
           <div className="space-y-4">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-[#C4964A]" />
-              <p className="text-white/70 text-xs tracking-wide">Render hoàn tất · {Object.keys(images).length} ảnh tham chiếu</p>
+              <p className="text-white/70 text-xs tracking-wide">
+                Render hoàn tất · {Object.keys(images).length}{" "}
+                ảnh tham chiếu
+              </p>
             </div>
 
             <div className="relative border border-white/10 overflow-hidden bg-black">
-              <img src={result} alt="AI 3D Render" className="w-full object-contain max-h-80" />
+              <img
+                src={result}
+                alt="AI 3D Render"
+                className="w-full object-contain max-h-80"
+              />
               <div className="absolute top-2 right-2 bg-[#C4964A] text-black text-[8px] tracking-[0.15em] uppercase px-2 py-0.5">
                 AI · 3D
               </div>
@@ -403,7 +653,8 @@ function RenderStep({
                 onClick={() => onDone(result)}
                 className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-[#C4964A] text-black text-xs tracking-[0.2em] uppercase hover:bg-[#d4a85a] transition-all duration-300"
               >
-                <ChevronRight size={14} /> Tiếp tục điền thông tin
+                <ChevronRight size={14} /> Tiếp tục điền thông
+                tin
               </button>
               <button
                 onClick={() => setArOpen(true)}
@@ -427,10 +678,17 @@ function RenderStep({
         {status === "error" && (
           <div className="border border-red-800/40 bg-red-900/10 p-5 space-y-4">
             <div className="flex items-start gap-3">
-              <AlertTriangle size={15} className="text-red-400 flex-shrink-0 mt-0.5" />
+              <AlertTriangle
+                size={15}
+                className="text-red-400 flex-shrink-0 mt-0.5"
+              />
               <div>
-                <p className="text-red-300 text-xs mb-1">Lỗi từ Gemini API</p>
-                <p className="text-red-400/60 text-[10px] leading-relaxed">{errorMsg}</p>
+                <p className="text-red-300 text-xs mb-1">
+                  Lỗi từ Gemini API
+                </p>
+                <p className="text-red-400/60 text-[10px] leading-relaxed">
+                  {errorMsg}
+                </p>
               </div>
             </div>
             <div className="flex gap-3">
@@ -462,17 +720,28 @@ function RenderStep({
 
       {/* Right: references */}
       <div className="lg:col-span-2 space-y-4">
-        <p className="text-white/30 text-[9px] tracking-[0.2em] uppercase">Ảnh tham chiếu</p>
+        <p className="text-white/30 text-[9px] tracking-[0.2em] uppercase">
+          Ảnh tham chiếu
+        </p>
         <div className="grid grid-cols-3 gap-2">
           {ANGLE_SLOTS.map((slot) => {
             const img = images[slot.key];
             if (!img) return null;
             return (
-              <div key={slot.key} className="flex flex-col gap-1">
+              <div
+                key={slot.key}
+                className="flex flex-col gap-1"
+              >
                 <div className="aspect-square bg-[#111] border border-white/8 overflow-hidden">
-                  <img src={img} alt={slot.label} className="w-full h-full object-cover" />
+                  <img
+                    src={img}
+                    alt={slot.label}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
-                <p className="text-white/25 text-[8px] text-center">{slot.label}</p>
+                <p className="text-white/25 text-[8px] text-center">
+                  {slot.label}
+                </p>
               </div>
             );
           })}
@@ -489,35 +758,47 @@ function InfoStep({
   onBack,
 }: {
   renderedImage: string;
-  onSave: (watch: Omit<CustomWatch, "id" | "isCustom" | "createdAt">) => void;
+  onSave: (
+    watch: Omit<CustomWatch, "id" | "isCustom" | "createdAt">,
+  ) => void;
   onBack: () => void;
 }) {
-  const [name, setName]         = useState("");
-  const [brand, setBrand]       = useState("");
+  const [name, setName] = useState("");
+  const [brand, setBrand] = useState("");
   const [reference, setReference] = useState("");
   const [priceStr, setPriceStr] = useState("");
-  const [strap, setStrap]       = useState("Leather");
-  const [sizeStr, setSizeStr]   = useState("40");
-  const [tag, setTag]           = useState("Custom");
-  const [desc, setDesc]         = useState("");
-  const [arOpen, setArOpen]     = useState(false);
+  const [strap, setStrap] = useState("Leather");
+  const [sizeStr, setSizeStr] = useState("40");
+  const [tag, setTag] = useState("Custom");
+  const [desc, setDesc] = useState("");
+  const [arOpen, setArOpen] = useState(false);
 
   const canSave = name.trim() && brand.trim();
 
   if (arOpen) {
-    return <ARTryOn watchImage={renderedImage} watchName={name || "Preview"} onClose={() => setArOpen(false)} />;
+    return (
+      <ARTryOn
+        watchImage={renderedImage}
+        watchName={name || "Preview"}
+        onClose={() => setArOpen(false)}
+      />
+    );
   }
 
   const handleSave = () => {
     if (!canSave) return;
-    const price = parseFloat(priceStr.replace(/[^0-9.]/g, "")) || 0;
-    const size  = parseFloat(sizeStr) || 40;
+    const price =
+      parseFloat(priceStr.replace(/[^0-9.]/g, "")) || 0;
+    const size = parseFloat(sizeStr) || 40;
     onSave({
       name: name.trim(),
       brand: brand.trim(),
       reference: reference.trim(),
       price,
-      displayPrice: price > 0 ? `${price.toLocaleString("vi-VN")} ₫` : "Liên hệ",
+      displayPrice:
+        price > 0
+          ? `${price.toLocaleString("vi-VN")} ₫`
+          : "Liên hệ",
       strap,
       size,
       image: renderedImage,
@@ -532,20 +813,34 @@ function InfoStep({
       {/* Left: Form */}
       <div className="lg:col-span-3 space-y-6">
         <div>
-          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 400, fontSize: "1.6rem" }}
-            className="text-white mb-2">Thông tin mẫu đồng hồ</h2>
+          <h2
+            style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontWeight: 400,
+              fontSize: "1.6rem",
+            }}
+            className="text-white mb-2"
+          >
+            Thông tin mẫu đồng hồ
+          </h2>
           <p className="text-white/40 text-xs leading-relaxed">
-            Điền thông tin chi tiết. Mẫu đồng hồ sẽ xuất hiện trong trang{" "}
-            <span className="text-[#C4964A]">Collections</span> khi lưu.
+            Điền thông tin chi tiết. Mẫu đồng hồ sẽ xuất hiện
+            trong trang{" "}
+            <span className="text-[#C4964A]">Collections</span>{" "}
+            khi lưu.
           </p>
         </div>
 
         <div className="space-y-4">
           {/* Name */}
           <div>
-            <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">Tên đồng hồ *</label>
+            <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+              Tên đồng hồ *
+            </label>
             <input
-              type="text" value={name} onChange={(e) => setName(e.target.value)}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               placeholder="Vd: Midnight Chronos"
               className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/80 px-4 py-3 text-xs placeholder:text-white/20 focus:outline-none transition-colors"
             />
@@ -554,17 +849,25 @@ function InfoStep({
           {/* Brand + Reference */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">Thương hiệu *</label>
+              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+                Thương hiệu *
+              </label>
               <input
-                type="text" value={brand} onChange={(e) => setBrand(e.target.value)}
+                type="text"
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
                 placeholder="Vd: TrueWrist"
                 className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/80 px-4 py-3 text-xs placeholder:text-white/20 focus:outline-none transition-colors"
               />
             </div>
             <div>
-              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">Mã tham chiếu</label>
+              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+                Mã tham chiếu
+              </label>
               <input
-                type="text" value={reference} onChange={(e) => setReference(e.target.value)}
+                type="text"
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
                 placeholder="Vd: TW-001-A"
                 className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/80 px-4 py-3 text-xs placeholder:text-white/20 focus:outline-none transition-colors"
               />
@@ -574,18 +877,27 @@ function InfoStep({
           {/* Price + Size */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">Giá (₫)</label>
+              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+                Giá (₫)
+              </label>
               <input
-                type="text" value={priceStr} onChange={(e) => setPriceStr(e.target.value)}
+                type="text"
+                value={priceStr}
+                onChange={(e) => setPriceStr(e.target.value)}
                 placeholder="Vd: 12500000"
                 className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/80 px-4 py-3 text-xs placeholder:text-white/20 focus:outline-none transition-colors"
               />
             </div>
             <div>
-              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">Kích thước (mm)</label>
+              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+                Kích thước (mm)
+              </label>
               <input
-                type="number" value={sizeStr} onChange={(e) => setSizeStr(e.target.value)}
-                min={28} max={50}
+                type="number"
+                value={sizeStr}
+                onChange={(e) => setSizeStr(e.target.value)}
+                min={28}
+                max={50}
                 className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/80 px-4 py-3 text-xs focus:outline-none transition-colors"
               />
             </div>
@@ -594,30 +906,42 @@ function InfoStep({
           {/* Strap + Tag */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">Dây đeo</label>
+              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+                Dây đeo
+              </label>
               <div className="flex flex-wrap gap-2">
                 {STRAP_OPTIONS.map((s) => (
                   <button
                     key={s}
                     onClick={() => setStrap(s)}
                     className={`px-3 py-1.5 text-[9px] border transition-all duration-150 ${
-                      strap === s ? "border-[#C4964A] text-[#C4964A] bg-[#C4964A]/10" : "border-white/12 text-white/35 hover:border-white/25"
+                      strap === s
+                        ? "border-[#C4964A] text-[#C4964A] bg-[#C4964A]/10"
+                        : "border-white/12 text-white/35 hover:border-white/25"
                     }`}
-                  >{s}</button>
+                  >
+                    {s}
+                  </button>
                 ))}
               </div>
             </div>
             <div>
-              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">Tag</label>
+              <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+                Tag
+              </label>
               <div className="flex flex-wrap gap-2">
                 {TAG_OPTIONS.map((t) => (
                   <button
                     key={t}
                     onClick={() => setTag(t)}
                     className={`px-3 py-1.5 text-[9px] border transition-all duration-150 ${
-                      tag === t ? "border-[#C4964A] text-[#C4964A] bg-[#C4964A]/10" : "border-white/12 text-white/35 hover:border-white/25"
+                      tag === t
+                        ? "border-[#C4964A] text-[#C4964A] bg-[#C4964A]/10"
+                        : "border-white/12 text-white/35 hover:border-white/25"
                     }`}
-                  >{t}</button>
+                  >
+                    {t}
+                  </button>
                 ))}
               </div>
             </div>
@@ -625,9 +949,12 @@ function InfoStep({
 
           {/* Description */}
           <div>
-            <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">Mô tả</label>
+            <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+              Mô tả
+            </label>
             <textarea
-              value={desc} onChange={(e) => setDesc(e.target.value)}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
               rows={3}
               placeholder="Mô tả chi tiết về mẫu đồng hồ..."
               className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/80 px-4 py-3 text-xs placeholder:text-white/20 focus:outline-none transition-colors resize-none"
@@ -651,18 +978,27 @@ function InfoStep({
           </button>
         </div>
 
-        <button onClick={onBack} className="text-white/25 text-[10px] hover:text-white/50 transition-colors flex items-center gap-1">
+        <button
+          onClick={onBack}
+          className="text-white/25 text-[10px] hover:text-white/50 transition-colors flex items-center gap-1"
+        >
           ← Quay lại render
         </button>
       </div>
 
       {/* Right: Preview card */}
       <div className="lg:col-span-2 space-y-5">
-        <p className="text-white/30 text-[9px] tracking-[0.2em] uppercase">Xem trước thẻ Collections</p>
+        <p className="text-white/30 text-[9px] tracking-[0.2em] uppercase">
+          Xem trước thẻ Collections
+        </p>
         <div className="bg-[#111111] border border-white/8 overflow-hidden">
           {/* Image */}
           <div className="relative aspect-square bg-black overflow-hidden">
-            <img src={renderedImage} alt="3D Render" className="w-full h-full object-cover" />
+            <img
+              src={renderedImage}
+              alt="3D Render"
+              className="w-full h-full object-cover"
+            />
             <div className="absolute top-3 left-3">
               <span className="bg-[#C4964A] text-black text-[8px] tracking-[0.12em] uppercase px-2 py-1">
                 {tag}
@@ -674,24 +1010,43 @@ function InfoStep({
           </div>
           {/* Info */}
           <div className="p-4 space-y-1">
-            <p className="text-[#C4964A] text-[9px] tracking-[0.2em] uppercase">{brand || "Thương hiệu"}</p>
-            <p style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 400, fontSize: "1.05rem" }}
-              className="text-white">{name || "Tên đồng hồ"}</p>
-            {reference && <p className="text-white/30 text-[9px]">Ref: {reference}</p>}
+            <p className="text-[#C4964A] text-[9px] tracking-[0.2em] uppercase">
+              {brand || "Thương hiệu"}
+            </p>
+            <p
+              style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontWeight: 400,
+                fontSize: "1.05rem",
+              }}
+              className="text-white"
+            >
+              {name || "Tên đồng hồ"}
+            </p>
+            {reference && (
+              <p className="text-white/30 text-[9px]">
+                Ref: {reference}
+              </p>
+            )}
             <div className="flex items-center justify-between pt-1">
               <p className="text-white/60 text-xs">
-                {priceStr ? `${parseFloat(priceStr.replace(/[^0-9.]/g, "")).toLocaleString("vi-VN")} ₫` : "Liên hệ"}
+                {priceStr
+                  ? `${parseFloat(priceStr.replace(/[^0-9.]/g, "")).toLocaleString("vi-VN")} ₫`
+                  : "Liên hệ"}
               </p>
-              <p className="text-white/30 text-[9px]">{sizeStr}mm · {strap}</p>
+              <p className="text-white/30 text-[9px]">
+                {sizeStr}mm · {strap}
+              </p>
             </div>
           </div>
         </div>
 
         <div className="border border-[#C4964A]/15 bg-[#C4964A]/5 p-4">
           <p className="text-[#C4964A]/80 text-[9px] leading-relaxed">
-            Sau khi lưu, mẫu đồng hồ này sẽ xuất hiện ngay trong trang{" "}
-            <span className="text-[#C4964A]">Collections</span> với đầy đủ tính năng
-            Try AR và xem chi tiết.
+            Sau khi lưu, mẫu đồng hồ này sẽ xuất hiện ngay trong
+            trang{" "}
+            <span className="text-[#C4964A]">Collections</span>{" "}
+            với đầy đủ tính năng Try AR và xem chi tiết.
           </p>
         </div>
       </div>
@@ -700,7 +1055,13 @@ function InfoStep({
 }
 
 /* ─── Step 4: Success ───────────────────────────────────── */
-function SuccessStep({ watchName, onReset }: { watchName: string; onReset: () => void }) {
+function SuccessStep({
+  watchName,
+  onReset,
+}: {
+  watchName: string;
+  onReset: () => void;
+}) {
   const navigate = useNavigate();
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -708,14 +1069,19 @@ function SuccessStep({ watchName, onReset }: { watchName: string; onReset: () =>
         <CheckCircle2 size={36} className="text-[#C4964A]" />
       </div>
       <h2
-        style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: "2.2rem" }}
+        style={{
+          fontFamily: "'Cormorant Garamond', serif",
+          fontWeight: 300,
+          fontSize: "2.2rem",
+        }}
         className="text-white mb-3"
       >
         Đã lưu thành công!
       </h2>
       <p className="text-white/40 text-xs leading-relaxed max-w-sm mb-10">
-        <span className="text-white/70">"{watchName}"</span> đã được thêm vào Collections.
-        Bạn có thể tìm thấy và thử AR ngay trong trang Collections.
+        <span className="text-white/70">"{watchName}"</span> đã
+        được thêm vào Collections. Bạn có thể tìm thấy và thử AR
+        ngay trong trang Collections.
       </p>
       <div className="flex gap-4 flex-wrap justify-center">
         <button
@@ -739,29 +1105,41 @@ function SuccessStep({ watchName, onReset }: { watchName: string; onReset: () =>
 export function CreatorStudio() {
   const { addWatch } = useWatchStore();
 
-  const [step, setStep]           = useState(0);
-  const [images, setImages]       = useState<Partial<Record<SlotKey, string>>>({});
-  const [rendered, setRendered]   = useState<string | null>(null);
+  const [step, setStep] = useState(0);
+  const [images, setImages] = useState<
+    Partial<Record<SlotKey, string>>
+  >({});
+  const [rendered, setRendered] = useState<string | null>(null);
   const [savedName, setSavedName] = useState("");
 
   const handleFile = useCallback(
-    (key: SlotKey) => (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      setImages((p) => ({ ...p, [key]: URL.createObjectURL(file) }));
-    },
-    []
+    (key: SlotKey) =>
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setImages((p) => ({
+          ...p,
+          [key]: URL.createObjectURL(file),
+        }));
+      },
+    [],
   );
 
   const handleRemove = (key: SlotKey) =>
-    setImages((p) => { const n = { ...p }; delete n[key]; return n; });
+    setImages((p) => {
+      const n = { ...p };
+      delete n[key];
+      return n;
+    });
 
   const handleRenderDone = (img: string) => {
     setRendered(img);
     setStep(2);
   };
 
-  const handleSave = (data: Omit<CustomWatch, "id" | "isCustom" | "createdAt">) => {
+  const handleSave = (
+    data: Omit<CustomWatch, "id" | "isCustom" | "createdAt">,
+  ) => {
     const watch: CustomWatch = {
       ...data,
       id: `custom-${Date.now()}`,
@@ -781,18 +1159,29 @@ export function CreatorStudio() {
   };
 
   return (
-    <div style={{ fontFamily: "'Jost', sans-serif" }} className="pt-20 min-h-screen bg-[#0A0A0A]">
+    <div
+      style={{ fontFamily: "'Jost', sans-serif" }}
+      className="pt-20 min-h-screen bg-[#0A0A0A]"
+    >
       {/* Header */}
       <div className="border-b border-white/8 py-14 text-center">
-        <p className="text-[#C4964A] text-[10px] tracking-[0.3em] uppercase mb-3">AI · Creator</p>
+        <p className="text-[#C4964A] text-[10px] tracking-[0.3em] uppercase mb-3">
+          AI · Creator
+        </p>
         <h1
-          style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: "clamp(2rem, 5vw, 4rem)", lineHeight: 1.05 }}
+          style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            fontWeight: 300,
+            fontSize: "clamp(2rem, 5vw, 4rem)",
+            lineHeight: 1.05,
+          }}
           className="text-white"
         >
           Creator Studio
         </h1>
         <p className="text-white/40 text-xs tracking-wide mt-4 max-w-md mx-auto leading-relaxed">
-          Upload ảnh thật → Gemini AI render 3D → Thêm vào Collections → Try AR trên cổ tay.
+          Upload ảnh thật → Gemini AI render 3D → Thêm vào
+          Collections → Try AR trên cổ tay.
         </p>
       </div>
 
@@ -823,7 +1212,10 @@ export function CreatorStudio() {
           />
         )}
         {step === 3 && (
-          <SuccessStep watchName={savedName} onReset={handleReset} />
+          <SuccessStep
+            watchName={savedName}
+            onReset={handleReset}
+          />
         )}
       </div>
     </div>
