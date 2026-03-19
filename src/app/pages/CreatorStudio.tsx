@@ -398,9 +398,19 @@ function RenderStep({
   const [renderUrl, setRenderUrl] = useState<string | null>(
     null,
   );
+  // blobUrl: safe same-origin URL for ARTryOn and canvas (no CORS issues)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [arOpen, setArOpen] = useState(false);
-  const [attempt, setAttempt] = useState(0); // bump to re-trigger useEffect
+  const [attempt, setAttempt] = useState(0);
+
+  // Revoke previous blobUrl on unmount / retry
+  useEffect(() => {
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt]);
 
   // Fallback = front image if render fails
   const fallbackUrl =
@@ -409,9 +419,9 @@ function RenderStep({
   useEffect(() => {
     setState("generating");
     setRenderUrl(null);
+    setBlobUrl(null);
     setErrorMsg("");
 
-    // Small delay so spinner is visible before URL is built
     const t = setTimeout(() => {
       const url = buildRenderUrl(watchDesc);
       setRenderUrl(url);
@@ -421,10 +431,28 @@ function RenderStep({
     return () => clearTimeout(t);
   }, [attempt, watchDesc]);
 
-  const handleImgLoad = () => setState("done");
+  // After img loads, immediately fetch as blob so ARTryOn gets a same-origin URL
+  const handleImgLoad = useCallback(async (src: string) => {
+    setState("done");
+    // If src is already a blob/data URL, just use it directly
+    if (src.startsWith("blob:") || src.startsWith("data:")) {
+      setBlobUrl(src);
+      return;
+    }
+    // Fetch remote URL → blob → objectURL
+    try {
+      const res = await fetch(src, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const newBlobUrl = URL.createObjectURL(blob);
+      setBlobUrl(newBlobUrl);
+    } catch {
+      // fetch failed (CORS / network) — pass original URL; ARTryOn will handle it
+      setBlobUrl(src);
+    }
+  }, []);
 
   const handleImgError = () => {
-    // Pollinations returned 404 or network error → fallback to uploaded image
     if (fallbackUrl) {
       setState("fallback");
     } else {
@@ -435,22 +463,30 @@ function RenderStep({
     }
   };
 
-  const retry = () => setAttempt((a) => a + 1);
+  const retry = () => {
+    setBlobUrl(null);
+    setAttempt((a) => a + 1);
+  };
 
   const useFallback = () => {
     if (fallbackUrl) {
       setState("done");
       setRenderUrl(fallbackUrl);
+      setBlobUrl(fallbackUrl); // blob: URL already same-origin
     }
   };
 
-  const resultUrl =
+  // The URL displayed in the <img> tag
+  const displayUrl =
     state === "fallback" ? fallbackUrl : renderUrl;
 
-  if (arOpen && resultUrl) {
+  // The URL passed to ARTryOn / onDone (prefer blob, fall back to display)
+  const safeUrl = blobUrl ?? displayUrl;
+
+  if (arOpen && safeUrl) {
     return (
       <ARTryOn
-        watchImage={resultUrl}
+        watchImage={safeUrl}
         watchName="Preview 3D"
         onClose={() => setArOpen(false)}
       />
@@ -458,10 +494,10 @@ function RenderStep({
   }
 
   const handleDownload = () => {
-    if (!resultUrl) return;
+    if (!safeUrl) return;
     const a = document.createElement("a");
     a.download = "truewrist-render.png";
-    a.href = resultUrl;
+    a.href = safeUrl;
     a.click();
   };
 
@@ -486,19 +522,23 @@ function RenderStep({
         </div>
 
         {/* The actual image element — always mounted once URL is ready so browser handles loading */}
-        {renderUrl && (
+        {displayUrl && (
           <div
             className={`relative border border-white/10 overflow-hidden bg-[#0d0d0d] ${state === "done" || state === "fallback" ? "block" : "hidden"}`}
           >
             <img
-              key={renderUrl}
+              key={displayUrl}
               src={
                 state === "fallback"
                   ? (fallbackUrl ?? "")
-                  : renderUrl
+                  : (renderUrl ?? "")
               }
               alt="AI Render"
-              onLoad={handleImgLoad}
+              onLoad={(e) =>
+                handleImgLoad(
+                  (e.target as HTMLImageElement).src,
+                )
+              }
               onError={handleImgError}
               className="w-full object-contain max-h-[420px]"
             />
@@ -605,22 +645,33 @@ function RenderStep({
 
         {/* Actions when result is ready */}
         {(state === "done" || state === "fallback") &&
-          resultUrl && (
+          safeUrl && (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <Sparkles
-                  size={14}
-                  className="text-[#C4964A]"
-                />
-                <p className="text-white/60 text-xs">
-                  {state === "done"
-                    ? "Render hoàn tất"
-                    : "Ảnh gốc đã sẵn sàng"}
-                </p>
+                {blobUrl ? (
+                  <>
+                    <Sparkles
+                      size={14}
+                      className="text-[#C4964A]"
+                    />
+                    <p className="text-white/60 text-xs">
+                      {state === "done"
+                        ? "Render hoàn tất · Sẵn sàng Try AR"
+                        : "Ảnh gốc đã sẵn sàng"}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-3 h-3 border border-[#C4964A] border-t-transparent rounded-full animate-spin" />
+                    <p className="text-white/40 text-xs">
+                      Đang chuẩn bị AR...
+                    </p>
+                  </>
+                )}
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => onDone(resultUrl)}
+                  onClick={() => onDone(safeUrl)}
                   className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-[#C4964A] text-black text-xs tracking-[0.2em] uppercase hover:bg-[#d4a85a] transition-all duration-300"
                 >
                   <ChevronRight size={14} /> Tiếp tục điền thông
@@ -628,7 +679,8 @@ function RenderStep({
                 </button>
                 <button
                   onClick={() => setArOpen(true)}
-                  className="px-4 py-3 border border-white/15 text-white/50 hover:border-[#C4964A] hover:text-[#C4964A] transition-all duration-200 flex items-center gap-1.5 text-[9px] uppercase"
+                  disabled={!blobUrl}
+                  className="px-4 py-3 border border-white/15 text-white/50 hover:border-[#C4964A] hover:text-[#C4964A] transition-all duration-200 flex items-center gap-1.5 text-[9px] uppercase disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <Eye size={13} /> Try AR
                 </button>

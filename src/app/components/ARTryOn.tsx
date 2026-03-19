@@ -45,7 +45,6 @@ export function ARTryOn({
           if (!cancelled) watchImgRef.current = img;
         };
         img.onerror = () => {
-          // Silently fail – watch just won't render on canvas
           console.warn(
             "ARTryOn: watch image failed to load",
             src,
@@ -53,7 +52,7 @@ export function ARTryOn({
         };
       };
 
-      // blob: / data: URLs are same-origin — load directly without crossOrigin
+      // blob: / data: URLs are same-origin — load directly, no CORS needed
       if (
         watchImage.startsWith("blob:") ||
         watchImage.startsWith("data:")
@@ -62,22 +61,19 @@ export function ARTryOn({
         return;
       }
 
-      // Remote URL: fetch → blob → objectURL
-      // This bypasses the browser cache CORS issue where <img> previously
-      // loaded the same URL without crossOrigin, poisoning the cache.
+      // Remote URL: fetch → blob → objectURL to avoid CORS cache issues
       try {
-        const res = await fetch(watchImage, { mode: "cors" });
+        const res = await fetch(watchImage, {
+          mode: "cors",
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         objectUrl = URL.createObjectURL(blob);
         if (!cancelled) finalize(objectUrl);
-      } catch (fetchErr) {
-        console.warn(
-          "ARTryOn: fetch failed, trying direct img load",
-          fetchErr,
-        );
-        // Last resort: add cache-busting param so browser doesn't reuse CORS-less cache
-        const bust = `${watchImage}${watchImage.includes("?") ? "&" : "?"}_cb=${Date.now()}`;
+      } catch {
+        // Last resort: cache-bust so browser makes a fresh CORS request
+        const bust = `${watchImage}${watchImage.includes("?") ? "&" : "?"}_ar=${Date.now()}`;
         if (!cancelled) finalize(bust, "anonymous");
       }
     };
