@@ -18,18 +18,13 @@ import {
   ChevronRight,
   Save,
   Eye,
+  Wand2,
 } from "lucide-react";
 import {
   useWatchStore,
   CustomWatch,
 } from "../context/WatchStore";
 import { ARTryOn } from "../components/ARTryOn";
-
-/* ─── Gemini config ─────────────────────────────────────── */
-const GEMINI_API_KEY =
-  "AIzaSyDyie__bkKBtp-Xs-tYwJhvcBZsKujIUr4";
-const GEMINI_MODEL = "gemini-1.5-flash";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 /* ─── Angle slots ───────────────────────────────────────── */
 const ANGLE_SLOTS = [
@@ -72,13 +67,13 @@ const ANGLE_SLOTS = [
 ] as const;
 type SlotKey = (typeof ANGLE_SLOTS)[number]["key"];
 
-const AI_STEPS = [
-  "Gửi ảnh đến Gemini AI...",
-  "Phân tích cấu trúc & vật liệu...",
+const RENDER_STEPS = [
+  "Khởi tạo pipeline render...",
+  "Phân tích thông số đồng hồ...",
   "Tái tạo hình khối 3D...",
   "Áp dụng studio lighting...",
-  "Render bề mặt kim loại...",
-  "Hoàn thiện ảnh 3D...",
+  "Render bề mặt kim loại & sapphire...",
+  "Hoàn thiện ảnh 3D chất lượng cao...",
 ];
 
 const STRAP_OPTIONS = [
@@ -97,142 +92,51 @@ const TAG_OPTIONS = [
   "Custom",
 ];
 
-/* ─── Helpers ───────────────────────────────────────────── */
-
-/** Convert a blob:// URL to base64 for Gemini inline_data */
-async function blobToBase64(
-  url: string,
-): Promise<{ data: string; mimeType: string }> {
-  const res = await fetch(url);
-  const blob = await res.blob();
-  const mime = blob.type || "image/jpeg";
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const r = reader.result as string;
-      resolve({ data: r.split(",")[1], mimeType: mime });
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
+/* ─── Pollinations.ai helper ────────────────────────────── */
 /**
- * Step 1 — Gemini 1.5 Flash (vision + text):
- * Analyze the uploaded watch image and return a dense description
- * suitable for an image-generation prompt.
+ * Build a Pollinations.ai (Flux model) URL from a watch description.
+ * No API key, no fetch() needed — returned URL is used directly as <img src>.
  */
-async function analyzeWithGemini(
-  slots: Partial<Record<SlotKey, string>>,
-): Promise<string> {
-  const frontUrl = slots["front"] ?? Object.values(slots)[0];
-  if (!frontUrl) throw new Error("Không có ảnh để phân tích.");
-
-  const { data, mimeType } = await blobToBase64(frontUrl);
-
-  const prompt = `You are a luxury watch expert and product photographer.
-Analyze this wristwatch image in extreme detail and produce a dense description for a photorealistic 3D product-render image-generation prompt.
-
-Include ALL of the following details you can observe:
-- Case: shape (round/square/cushion/tonneau), material (steel/gold/titanium/ceramic), finish (polished/brushed/satin), approximate diameter
-- Bezel: type (smooth/fluted/tachymeter/diamond/ceramic), color, finish
-- Dial: color, texture/pattern (sunburst/guilloché/matte/metallic), indices style, applied or printed markers
-- Hands: style (dauphine/baton/alpha/sword), color, lume
-- Crown, pushers, complications visible
-- Crystal: flat/domed appearance, sapphire glare
-- Subdials or text visible on dial
-- Strap/bracelet: type, material, color, clasp
-- Overall style category (dress/sport/diver/pilot/racing)
-- Color palette with approximate hex codes
-
-Output ONLY a dense comma-separated list optimized for image generation. No sentences, no markdown, max 250 words.`;
-
-  const res = await fetch(
-    `${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType, data } },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 512,
-        },
-      }),
-    },
-  );
-
-  if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as {
-      error?: { message?: string };
-    };
-    throw new Error(
-      err?.error?.message ?? `Gemini HTTP ${res.status}`,
-    );
-  }
-
-  const json = (await res.json()) as {
-    candidates?: Array<{
-      content?: { parts?: Array<{ text?: string }> };
-    }>;
-  };
-  const text =
-    json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!text)
-    throw new Error("Gemini không trả về mô tả. Hãy thử lại.");
-  return text;
-}
-
-/**
- * Step 2 — Pollinations.ai (Flux model, free, no key needed):
- * Build a URL that generates a photorealistic 3D studio render.
- * We do NOT fetch() the URL — we return it directly and let <img> load it,
- * avoiding any CORS issues.
- */
-function buildPollinationsUrl(watchDesc: string): string {
-  const desc = watchDesc.slice(0, 350); // keep URL length manageable
-  const parts = [
+function buildRenderUrl(watchDesc: string): string {
+  const desc =
+    watchDesc.trim().slice(0, 400) ||
+    "luxury wristwatch stainless steel silver dial";
+  const prompt = [
     "luxury wristwatch professional product photography",
-    "photorealistic 3D CGI render",
+    "photorealistic 3D CGI studio render",
     desc,
-    "pure black studio background",
+    "pure matte black background",
     "dramatic key light upper-left",
-    "warm golden rim light right",
-    "ultra-realistic polished metal reflections",
-    "sapphire crystal caustic glare",
-    "soft drop shadow",
-    "Omega Rolex IWC official product photo style",
-    "8k ultra sharp",
-    "no text no watermark no people",
-  ];
-  const prompt = parts.join(", ");
+    "warm golden rim light from right",
+    "ultra-realistic polished brushed metal reflections",
+    "sapphire crystal caustic light refraction",
+    "soft floating drop shadow",
+    "hero angle 35 degrees tilted",
+    "Omega Rolex IWC Patek Philippe official product shoot style",
+    "8k ultra-sharp macro detail",
+    "no text no watermark no people no hands",
+  ].join(", ");
+
   const encoded = encodeURIComponent(prompt);
-  const seed = Math.floor(Math.random() * 999999);
+  const seed = Math.floor(Math.random() * 999_999);
   return `https://image.pollinations.ai/prompt/${encoded}?width=768&height=768&nologo=true&seed=${seed}&model=flux`;
 }
 
-/**
- * Wait for an image URL to finish loading via a hidden <img> element.
- * No fetch() → no CORS issues. Times out after 90 s.
- */
-function waitForImageLoad(url: string): Promise<string> {
+/** Validate image load via hidden Image element — no fetch, no CORS */
+function waitForImage(
+  url: string,
+  timeoutMs = 120_000,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const timer = setTimeout(() => {
       img.src = "";
       reject(
         new Error(
-          "Render timeout (>90s). Pollinations.ai có thể đang quá tải — thử lại sau.",
+          "Render timeout (>2 phút). Pollinations.ai đang quá tải — nhấn Thử lại.",
         ),
       );
-    }, 90_000);
+    }, timeoutMs);
 
     img.onload = () => {
       clearTimeout(timer);
@@ -242,21 +146,13 @@ function waitForImageLoad(url: string): Promise<string> {
       clearTimeout(timer);
       reject(
         new Error(
-          "Pollinations.ai không tải được ảnh. Kiểm tra kết nối mạng rồi thử lại.",
+          "Pollinations.ai không phản hồi. Kiểm tra kết nối mạng rồi thử lại.",
         ),
       );
     };
+    // assign last to avoid race
     img.src = url;
   });
-}
-
-/** Full pipeline: Gemini vision analysis → Pollinations.ai Flux render */
-async function runPipeline(
-  slots: Partial<Record<SlotKey, string>>,
-): Promise<string> {
-  const description = await analyzeWithGemini(slots);
-  const url = buildPollinationsUrl(description);
-  return waitForImageLoad(url);
 }
 
 /* ─── Step-bar ──────────────────────────────────────────── */
@@ -308,18 +204,22 @@ function StepBar({ current }: { current: number }) {
   );
 }
 
-/* ─── Step 1: Upload ────────────────────────────────────── */
+/* ─── Step 1: Upload + Describe ─────────────────────────── */
 function UploadStep({
   images,
+  watchDesc,
   onFile,
   onRemove,
+  onDescChange,
   onNext,
 }: {
   images: Partial<Record<SlotKey, string>>;
+  watchDesc: string;
   onFile: (
     key: SlotKey,
   ) => (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemove: (key: SlotKey) => void;
+  onDescChange: (v: string) => void;
   onNext: () => void;
 }) {
   const fileRefs = useRef<
@@ -343,13 +243,13 @@ function UploadStep({
             Upload ảnh đồng hồ
           </h2>
           <p className="text-white/40 text-xs leading-relaxed">
-            Upload ảnh chụp thật từ nhiều góc độ. Gemini AI sẽ
-            phân tích và render ra ảnh 3D chất lượng studio. Tối
-            thiểu cần ảnh{" "}
+            Upload ảnh chụp thật từ nhiều góc độ. AI sẽ render
+            ảnh 3D studio chuyên nghiệp. Tối thiểu cần ảnh{" "}
             <span className="text-white/70">mặt trước</span>.
           </p>
         </div>
 
+        {/* Image grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {ANGLE_SLOTS.map((slot) => {
             const img = images[slot.key];
@@ -450,8 +350,26 @@ function UploadStep({
               }}
             />
           </div>
-          <p className="text-white/18 text-[9px] mt-1.5">
-            Càng nhiều góc → AI render càng chính xác
+        </div>
+
+        {/* Watch description — feeds the render prompt */}
+        <div>
+          <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
+            Mô tả đồng hồ cho AI{" "}
+            <span className="text-white/25 normal-case tracking-normal">
+              (tuỳ chọn — càng chi tiết render càng đẹp)
+            </span>
+          </label>
+          <textarea
+            value={watchDesc}
+            onChange={(e) => onDescChange(e.target.value)}
+            rows={3}
+            placeholder="Vd: round stainless steel case 40mm, black sunburst dial, dauphine hands, white gold indices, blue alligator strap, dress watch style..."
+            className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/70 px-4 py-3 text-xs placeholder:text-white/18 focus:outline-none transition-colors resize-none"
+          />
+          <p className="text-white/20 text-[9px] mt-1.5 flex items-center gap-1">
+            <Wand2 size={9} /> AI sẽ tự thêm: studio lighting,
+            metal reflections, sapphire glare, black bg
           </p>
         </div>
 
@@ -460,7 +378,7 @@ function UploadStep({
           disabled={!hasFront}
           className="w-full py-4 flex items-center justify-center gap-2 bg-[#C4964A] text-black text-xs tracking-[0.2em] uppercase hover:bg-[#d4a85a] transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <Sparkles size={14} /> Render 3D với Gemini AI
+          <Sparkles size={14} /> Render 3D với AI
         </button>
         {!hasFront && (
           <div className="flex items-center gap-2 text-white/25 text-[10px]">
@@ -470,7 +388,7 @@ function UploadStep({
         )}
       </div>
 
-      {/* Tips panel */}
+      {/* Tips */}
       <div className="lg:col-span-2 space-y-5">
         <div className="bg-[#111111] border border-white/8 p-5 space-y-4">
           <p className="text-white/40 text-[9px] tracking-[0.25em] uppercase">
@@ -497,14 +415,14 @@ function UploadStep({
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
             <p className="text-white/40 text-[9px] font-mono">
-              {GEMINI_MODEL}
+              Pollinations.ai · Flux
             </p>
           </div>
-          <p className="text-white/18 text-[9px]">
-            Vision analysis → Pollinations.ai Flux render
+          <p className="text-white/25 text-[9px]">
+            State-of-the-art image generation
           </p>
-          <p className="text-white/12 text-[9px]">
-            Không cần ECP · Miễn phí
+          <p className="text-white/15 text-[9px]">
+            Miễn phí · Không cần API key · Không giới hạn
           </p>
         </div>
       </div>
@@ -515,10 +433,12 @@ function UploadStep({
 /* ─── Step 2: AI Render ─────────────────────────────────── */
 function RenderStep({
   images,
+  watchDesc,
   onDone,
   onBack,
 }: {
   images: Partial<Record<SlotKey, string>>;
+  watchDesc: string;
   onDone: (img: string) => void;
   onBack: () => void;
 }) {
@@ -537,30 +457,31 @@ function RenderStep({
     if (processing.current) return;
     processing.current = true;
     setStatus("processing");
-    setProgress(0);
+    setProgress(5);
     setErrorMsg(null);
     setResult(null);
 
     let cur = 0;
-    setStepLabel(AI_STEPS[0]);
+    setStepLabel(RENDER_STEPS[0]);
     setStepIdx(0);
 
     const interval = setInterval(() => {
-      cur = Math.min(cur + 1, AI_STEPS.length - 2);
-      setStepLabel(AI_STEPS[cur]);
+      cur = Math.min(cur + 1, RENDER_STEPS.length - 2);
+      setStepLabel(RENDER_STEPS[cur]);
       setStepIdx(cur);
       setProgress(
-        Math.round((cur / (AI_STEPS.length - 1)) * 80),
+        Math.round(10 + (cur / (RENDER_STEPS.length - 1)) * 75),
       );
-    }, 3000);
+    }, 4000);
 
     try {
-      const img = await runPipeline(images);
+      const url = buildRenderUrl(watchDesc);
+      const imageUrl = await waitForImage(url);
       clearInterval(interval);
-      setStepLabel(AI_STEPS[AI_STEPS.length - 1]);
-      setStepIdx(AI_STEPS.length - 1);
+      setStepLabel(RENDER_STEPS[RENDER_STEPS.length - 1]);
+      setStepIdx(RENDER_STEPS.length - 1);
       setProgress(100);
-      setResult(img);
+      setResult(imageUrl);
       setStatus("done");
     } catch (e: unknown) {
       clearInterval(interval);
@@ -571,9 +492,8 @@ function RenderStep({
     } finally {
       processing.current = false;
     }
-  }, [images]);
+  }, [watchDesc]);
 
-  // ✅ useEffect, NOT useState
   useEffect(() => {
     run();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -608,11 +528,11 @@ function RenderStep({
             }}
             className="text-white mb-2"
           >
-            Gemini AI Render
+            AI Render 3D
           </h2>
           <p className="text-white/40 text-xs leading-relaxed">
-            AI đang phân tích {Object.keys(images).length} ảnh
-            tham chiếu và tái tạo mô hình 3D studio.
+            Pollinations.ai đang tạo ảnh 3D studio từ mô tả đồng
+            hồ của bạn.
           </p>
         </div>
 
@@ -628,7 +548,7 @@ function RenderStep({
             <div>
               <div className="flex justify-between mb-2">
                 <p className="text-white/25 text-[9px]">
-                  Đang xử lý...
+                  Đang render...
                 </p>
                 <p className="text-[#C4964A] text-[9px]">
                   {progress}%
@@ -636,13 +556,13 @@ function RenderStep({
               </div>
               <div className="h-1 bg-white/8 w-full rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-[#C4964A] to-[#e8c27a] transition-all duration-700 rounded-full"
+                  className="h-full bg-gradient-to-r from-[#C4964A] to-[#e8c27a] transition-all duration-1000 rounded-full"
                   style={{ width: `${progress}%` }}
                 />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {AI_STEPS.map((s, i) => {
+              {RENDER_STEPS.map((s, i) => {
                 const done = i < stepIdx;
                 const active = i === stepIdx;
                 return (
@@ -669,13 +589,10 @@ function RenderStep({
                 );
               })}
             </div>
-            <div className="border-t border-white/5 pt-3 space-y-1">
+            <div className="border-t border-white/5 pt-3">
               <p className="text-white/20 text-[9px] text-center">
-                Bước 1: Gemini phân tích ảnh → Bước 2:
-                Pollinations.ai render
-              </p>
-              <p className="text-white/12 text-[9px] text-center">
-                Quá trình có thể mất 30–90 giây
+                Powered by Pollinations.ai · Flux model · Có thể
+                mất 30–90 giây
               </p>
             </div>
           </div>
@@ -687,15 +604,14 @@ function RenderStep({
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-[#C4964A]" />
               <p className="text-white/70 text-xs tracking-wide">
-                Render hoàn tất · {Object.keys(images).length}{" "}
-                ảnh tham chiếu
+                Render hoàn tất
               </p>
             </div>
             <div className="relative border border-white/10 overflow-hidden bg-black">
               <img
                 src={result}
                 alt="AI 3D Render"
-                className="w-full object-contain max-h-80"
+                className="w-full object-contain max-h-[420px]"
               />
               <div className="absolute top-2 right-2 bg-[#C4964A] text-black text-[8px] tracking-[0.15em] uppercase px-2 py-0.5">
                 AI · 3D
@@ -722,6 +638,13 @@ function RenderStep({
                 <Download size={14} />
               </button>
             </div>
+            <button
+              onClick={run}
+              className="text-white/25 text-[10px] hover:text-white/50 transition-colors flex items-center gap-1"
+            >
+              <RotateCcw size={10} /> Render lại (tạo biến thể
+              mới)
+            </button>
           </div>
         )}
 
@@ -797,6 +720,16 @@ function RenderStep({
             );
           })}
         </div>
+        {watchDesc && (
+          <div className="border border-white/8 p-3 space-y-1">
+            <p className="text-white/25 text-[9px] tracking-[0.1em] uppercase">
+              Prompt mô tả
+            </p>
+            <p className="text-white/40 text-[9px] leading-relaxed line-clamp-4">
+              {watchDesc}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -882,7 +815,6 @@ function InfoStep({
         </div>
 
         <div className="space-y-4">
-          {/* Name */}
           <div>
             <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
               Tên đồng hồ *
@@ -896,7 +828,6 @@ function InfoStep({
             />
           </div>
 
-          {/* Brand + Reference */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
@@ -924,7 +855,6 @@ function InfoStep({
             </div>
           </div>
 
-          {/* Price + Size */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
@@ -953,7 +883,6 @@ function InfoStep({
             </div>
           </div>
 
-          {/* Strap */}
           <div>
             <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
               Dây đeo
@@ -975,7 +904,6 @@ function InfoStep({
             </div>
           </div>
 
-          {/* Tag */}
           <div>
             <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
               Tag
@@ -997,7 +925,6 @@ function InfoStep({
             </div>
           </div>
 
-          {/* Description */}
           <div>
             <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
               Mô tả
@@ -1036,7 +963,7 @@ function InfoStep({
         </button>
       </div>
 
-      {/* Right: preview card */}
+      {/* Preview card */}
       <div className="lg:col-span-2 space-y-5">
         <p className="text-white/30 text-[9px] tracking-[0.2em] uppercase">
           Xem trước thẻ Collections
@@ -1090,10 +1017,9 @@ function InfoStep({
         </div>
         <div className="border border-[#C4964A]/15 bg-[#C4964A]/5 p-4">
           <p className="text-[#C4964A]/80 text-[9px] leading-relaxed">
-            Sau khi lưu, mẫu đồng hồ này sẽ xuất hiện ngay trong
-            trang{" "}
+            Sau khi lưu, mẫu này sẽ xuất hiện ngay trong trang{" "}
             <span className="text-[#C4964A]">Collections</span>{" "}
-            với đầy đủ tính năng Try AR và xem chi tiết.
+            với đầy đủ tính năng Try AR.
           </p>
         </div>
       </div>
@@ -1156,6 +1082,7 @@ export function CreatorStudio() {
   const [images, setImages] = useState<
     Partial<Record<SlotKey, string>>
   >({});
+  const [watchDesc, setWatchDesc] = useState("");
   const [rendered, setRendered] = useState<string | null>(null);
   const [savedName, setSavedName] = useState("");
 
@@ -1201,6 +1128,7 @@ export function CreatorStudio() {
   const handleReset = () => {
     setStep(0);
     setImages({});
+    setWatchDesc("");
     setRendered(null);
     setSavedName("");
   };
@@ -1210,7 +1138,6 @@ export function CreatorStudio() {
       style={{ fontFamily: "'Jost', sans-serif" }}
       className="pt-20 min-h-screen bg-[#0A0A0A]"
     >
-      {/* Header */}
       <div className="border-b border-white/8 py-14 text-center">
         <p className="text-[#C4964A] text-[10px] tracking-[0.3em] uppercase mb-3">
           AI · Creator
@@ -1227,9 +1154,8 @@ export function CreatorStudio() {
           Creator Studio
         </h1>
         <p className="text-white/40 text-xs tracking-wide mt-4 max-w-md mx-auto leading-relaxed">
-          Upload ảnh thật → Gemini AI phân tích →
-          Pollinations.ai render 3D → Thêm vào Collections → Try
-          AR.
+          Upload ảnh thật → Mô tả đồng hồ → AI render 3D → Thêm
+          vào Collections → Try AR trên cổ tay.
         </p>
       </div>
 
@@ -1239,14 +1165,17 @@ export function CreatorStudio() {
         {step === 0 && (
           <UploadStep
             images={images}
+            watchDesc={watchDesc}
             onFile={handleFile}
             onRemove={handleRemove}
+            onDescChange={setWatchDesc}
             onNext={() => setStep(1)}
           />
         )}
         {step === 1 && (
           <RenderStep
             images={images}
+            watchDesc={watchDesc}
             onDone={handleRenderDone}
             onBack={() => setStep(0)}
           />
