@@ -10,7 +10,7 @@ import { ARTryOn } from "../components/ARTryOn";
 
 /* ─── Gemini config ─────────────────────────────────────── */
 const GEMINI_API_KEY  = "AIzaSyDyie__bkKBtp-Xs-tYwJhvcBZsKujIUr4";
-const GEMINI_MODEL    = "gemini-2.0-flash-preview-image-generation";
+const GEMINI_MODEL    = "gemini-2.0-flash-exp";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 /* ─── Angle slots ───────────────────────────────────────── */
@@ -85,7 +85,7 @@ Output ONLY the rendered image, no background text or elements.`;
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts }],
-      generationConfig: { responseModalities: ["IMAGE"] },
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
     }),
   });
 
