@@ -13,12 +13,12 @@ import {
   RefreshCw,
   Sparkles,
   Download,
-  AlertTriangle,
   AlertCircle,
   ChevronRight,
   Save,
   Eye,
   Wand2,
+  ImageOff,
 } from "lucide-react";
 import {
   useWatchStore,
@@ -26,7 +26,7 @@ import {
 } from "../context/WatchStore";
 import { ARTryOn } from "../components/ARTryOn";
 
-/* ─── Angle slots ───────────────────────────────────────── */
+/* ─── Slots ─────────────────────────────────────────────── */
 const ANGLE_SLOTS = [
   {
     key: "front",
@@ -42,7 +42,7 @@ const ANGLE_SLOTS = [
   },
   {
     key: "left",
-    label: "Mặt bên trái",
+    label: "Bên trái",
     hint: "Góc 90°",
     required: false,
   },
@@ -54,27 +54,18 @@ const ANGLE_SLOTS = [
   },
   {
     key: "right",
-    label: "Mặt bên phải",
+    label: "Bên phải",
     hint: "Góc 90°",
     required: false,
   },
   {
     key: "back",
     label: "Mặt sau",
-    hint: "Phía sau đồng hồ",
+    hint: "Phía sau",
     required: false,
   },
 ] as const;
 type SlotKey = (typeof ANGLE_SLOTS)[number]["key"];
-
-const RENDER_STEPS = [
-  "Khởi tạo pipeline render...",
-  "Phân tích thông số đồng hồ...",
-  "Tái tạo hình khối 3D...",
-  "Áp dụng studio lighting...",
-  "Render bề mặt kim loại & sapphire...",
-  "Hoàn thiện ảnh 3D chất lượng cao...",
-];
 
 const STRAP_OPTIONS = [
   "Leather",
@@ -92,67 +83,23 @@ const TAG_OPTIONS = [
   "Custom",
 ];
 
-/* ─── Pollinations.ai helper ────────────────────────────── */
-/**
- * Build a Pollinations.ai (Flux model) URL from a watch description.
- * No API key, no fetch() needed — returned URL is used directly as <img src>.
- */
-function buildRenderUrl(watchDesc: string): string {
+/* ─── Pollinations URL builder ──────────────────────────── */
+// Keep prompt SHORT to avoid URL length 404 errors on Pollinations.ai
+function buildRenderUrl(userDesc: string): string {
+  // Strip to essentials — max ~150 chars for the description part
   const desc =
-    watchDesc.trim().slice(0, 400) ||
-    "luxury wristwatch stainless steel silver dial";
-  const prompt = [
-    "luxury wristwatch professional product photography",
-    "photorealistic 3D CGI studio render",
-    desc,
-    "pure matte black background",
-    "dramatic key light upper-left",
-    "warm golden rim light from right",
-    "ultra-realistic polished brushed metal reflections",
-    "sapphire crystal caustic light refraction",
-    "soft floating drop shadow",
-    "hero angle 35 degrees tilted",
-    "Omega Rolex IWC Patek Philippe official product shoot style",
-    "8k ultra-sharp macro detail",
-    "no text no watermark no people no hands",
-  ].join(", ");
+    userDesc.trim().slice(0, 150) ||
+    "luxury stainless steel watch silver dial";
 
-  const encoded = encodeURIComponent(prompt);
+  // Compact fixed suffix — all essential render keywords
+  const suffix = "product photo black bg studio light 8k";
+  const full = `luxury wristwatch 3D render ${desc} ${suffix}`;
+
+  const encoded = encodeURIComponent(full);
   const seed = Math.floor(Math.random() * 999_999);
-  return `https://image.pollinations.ai/prompt/${encoded}?width=768&height=768&nologo=true&seed=${seed}&model=flux`;
-}
 
-/** Validate image load via hidden Image element — no fetch, no CORS */
-function waitForImage(
-  url: string,
-  timeoutMs = 120_000,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const timer = setTimeout(() => {
-      img.src = "";
-      reject(
-        new Error(
-          "Render timeout (>2 phút). Pollinations.ai đang quá tải — nhấn Thử lại.",
-        ),
-      );
-    }, timeoutMs);
-
-    img.onload = () => {
-      clearTimeout(timer);
-      resolve(url);
-    };
-    img.onerror = () => {
-      clearTimeout(timer);
-      reject(
-        new Error(
-          "Pollinations.ai không phản hồi. Kiểm tra kết nối mạng rồi thử lại.",
-        ),
-      );
-    };
-    // assign last to avoid race
-    img.src = url;
-  });
+  // Use model=turbo — faster & more reliable than flux for this use case
+  return `https://image.pollinations.ai/prompt/${encoded}?width=768&height=768&nologo=true&seed=${seed}&model=turbo`;
 }
 
 /* ─── Step-bar ──────────────────────────────────────────── */
@@ -243,13 +190,12 @@ function UploadStep({
             Upload ảnh đồng hồ
           </h2>
           <p className="text-white/40 text-xs leading-relaxed">
-            Upload ảnh chụp thật từ nhiều góc độ. AI sẽ render
-            ảnh 3D studio chuyên nghiệp. Tối thiểu cần ảnh{" "}
+            Upload ảnh chụp thật. AI sẽ tạo ảnh 3D studio chuyên
+            nghiệp. Tối thiểu cần ảnh{" "}
             <span className="text-white/70">mặt trước</span>.
           </p>
         </div>
 
-        {/* Image grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {ANGLE_SLOTS.map((slot) => {
             const img = images[slot.key];
@@ -332,7 +278,7 @@ function UploadStep({
           })}
         </div>
 
-        {/* Coverage bar */}
+        {/* Coverage */}
         <div>
           <div className="flex justify-between mb-1.5">
             <p className="text-white/30 text-[9px] tracking-[0.15em] uppercase">
@@ -352,25 +298,31 @@ function UploadStep({
           </div>
         </div>
 
-        {/* Watch description — feeds the render prompt */}
+        {/* Description */}
         <div>
           <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
-            Mô tả đồng hồ cho AI{" "}
+            Mô tả ngắn cho AI{" "}
             <span className="text-white/25 normal-case tracking-normal">
-              (tuỳ chọn — càng chi tiết render càng đẹp)
+              (tuỳ chọn)
             </span>
           </label>
           <textarea
             value={watchDesc}
             onChange={(e) => onDescChange(e.target.value)}
-            rows={3}
-            placeholder="Vd: round stainless steel case 40mm, black sunburst dial, dauphine hands, white gold indices, blue alligator strap, dress watch style..."
+            rows={2}
+            maxLength={150}
+            placeholder="Vd: black dial chronograph steel bracelet sport watch"
             className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/70 px-4 py-3 text-xs placeholder:text-white/18 focus:outline-none transition-colors resize-none"
           />
-          <p className="text-white/20 text-[9px] mt-1.5 flex items-center gap-1">
-            <Wand2 size={9} /> AI sẽ tự thêm: studio lighting,
-            metal reflections, sapphire glare, black bg
-          </p>
+          <div className="flex justify-between mt-1">
+            <p className="text-white/18 text-[9px] flex items-center gap-1">
+              <Wand2 size={9} /> Dùng tiếng Anh để render đẹp
+              nhất
+            </p>
+            <p className="text-white/20 text-[9px]">
+              {watchDesc.length}/150
+            </p>
+          </div>
         </div>
 
         <button
@@ -388,19 +340,16 @@ function UploadStep({
         )}
       </div>
 
-      {/* Tips */}
       <div className="lg:col-span-2 space-y-5">
         <div className="bg-[#111111] border border-white/8 p-5 space-y-4">
           <p className="text-white/40 text-[9px] tracking-[0.25em] uppercase">
             Mẹo chụp ảnh
           </p>
           {[
-            "Dùng nền trắng hoặc xám đồng nhất",
-            "Ánh sáng tự nhiên hoặc đèn studio, tránh bóng cứng",
-            "Giữ khoảng cách 20–30 cm từ đồng hồ",
+            "Nền trắng hoặc xám đồng nhất",
+            "Ánh sáng đều, tránh bóng cứng",
             "Đồng hồ chiếm 70–80% khung hình",
-            "Mỗi góc xoay ~45° so với góc kề",
-            "Ảnh rõ nét, không bị mờ hay rung",
+            "Ảnh rõ nét, không bị mờ",
           ].map((t) => (
             <div key={t} className="flex gap-2.5 items-start">
               <div className="w-1 h-1 bg-[#C4964A] rounded-full mt-1.5 flex-shrink-0" />
@@ -410,19 +359,15 @@ function UploadStep({
             </div>
           ))}
         </div>
-
         <div className="border border-white/5 p-4 space-y-2">
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
             <p className="text-white/40 text-[9px] font-mono">
-              Pollinations.ai · Flux
+              Pollinations.ai · Turbo
             </p>
           </div>
-          <p className="text-white/25 text-[9px]">
-            State-of-the-art image generation
-          </p>
           <p className="text-white/15 text-[9px]">
-            Miễn phí · Không cần API key · Không giới hạn
+            Miễn phí · Không cần API key
           </p>
         </div>
       </div>
@@ -431,6 +376,13 @@ function UploadStep({
 }
 
 /* ─── Step 2: AI Render ─────────────────────────────────── */
+type RenderState =
+  | "generating"
+  | "loading"
+  | "done"
+  | "error"
+  | "fallback";
+
 function RenderStep({
   images,
   watchDesc,
@@ -442,66 +394,63 @@ function RenderStep({
   onDone: (img: string) => void;
   onBack: () => void;
 }) {
-  const [status, setStatus] = useState<
-    "idle" | "processing" | "done" | "error"
-  >("idle");
-  const [progress, setProgress] = useState(0);
-  const [stepIdx, setStepIdx] = useState(0);
-  const [stepLabel, setStepLabel] = useState("");
-  const [result, setResult] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [state, setState] = useState<RenderState>("generating");
+  const [renderUrl, setRenderUrl] = useState<string | null>(
+    null,
+  );
+  const [errorMsg, setErrorMsg] = useState("");
   const [arOpen, setArOpen] = useState(false);
-  const processing = useRef(false);
+  const [attempt, setAttempt] = useState(0); // bump to re-trigger useEffect
 
-  const run = useCallback(async () => {
-    if (processing.current) return;
-    processing.current = true;
-    setStatus("processing");
-    setProgress(5);
-    setErrorMsg(null);
-    setResult(null);
-
-    let cur = 0;
-    setStepLabel(RENDER_STEPS[0]);
-    setStepIdx(0);
-
-    const interval = setInterval(() => {
-      cur = Math.min(cur + 1, RENDER_STEPS.length - 2);
-      setStepLabel(RENDER_STEPS[cur]);
-      setStepIdx(cur);
-      setProgress(
-        Math.round(10 + (cur / (RENDER_STEPS.length - 1)) * 75),
-      );
-    }, 4000);
-
-    try {
-      const url = buildRenderUrl(watchDesc);
-      const imageUrl = await waitForImage(url);
-      clearInterval(interval);
-      setStepLabel(RENDER_STEPS[RENDER_STEPS.length - 1]);
-      setStepIdx(RENDER_STEPS.length - 1);
-      setProgress(100);
-      setResult(imageUrl);
-      setStatus("done");
-    } catch (e: unknown) {
-      clearInterval(interval);
-      setErrorMsg(
-        e instanceof Error ? e.message : "Lỗi không xác định.",
-      );
-      setStatus("error");
-    } finally {
-      processing.current = false;
-    }
-  }, [watchDesc]);
+  // Fallback = front image if render fails
+  const fallbackUrl =
+    images["front"] ?? Object.values(images)[0] ?? null;
 
   useEffect(() => {
-    run();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setState("generating");
+    setRenderUrl(null);
+    setErrorMsg("");
 
-  if (arOpen && result) {
+    // Small delay so spinner is visible before URL is built
+    const t = setTimeout(() => {
+      const url = buildRenderUrl(watchDesc);
+      setRenderUrl(url);
+      setState("loading");
+    }, 800);
+
+    return () => clearTimeout(t);
+  }, [attempt, watchDesc]);
+
+  const handleImgLoad = () => setState("done");
+
+  const handleImgError = () => {
+    // Pollinations returned 404 or network error → fallback to uploaded image
+    if (fallbackUrl) {
+      setState("fallback");
+    } else {
+      setState("error");
+      setErrorMsg(
+        "Không tải được ảnh render. Vui lòng thử lại.",
+      );
+    }
+  };
+
+  const retry = () => setAttempt((a) => a + 1);
+
+  const useFallback = () => {
+    if (fallbackUrl) {
+      setState("done");
+      setRenderUrl(fallbackUrl);
+    }
+  };
+
+  const resultUrl =
+    state === "fallback" ? fallbackUrl : renderUrl;
+
+  if (arOpen && resultUrl) {
     return (
       <ARTryOn
-        watchImage={result}
+        watchImage={resultUrl}
         watchName="Preview 3D"
         onClose={() => setArOpen(false)}
       />
@@ -509,10 +458,10 @@ function RenderStep({
   }
 
   const handleDownload = () => {
-    if (!result) return;
+    if (!resultUrl) return;
     const a = document.createElement("a");
-    a.download = "truewrist-3d-render.png";
-    a.href = result;
+    a.download = "truewrist-render.png";
+    a.href = resultUrl;
     a.click();
   };
 
@@ -536,123 +485,93 @@ function RenderStep({
           </p>
         </div>
 
-        {/* Processing */}
-        {status === "processing" && (
+        {/* The actual image element — always mounted once URL is ready so browser handles loading */}
+        {renderUrl && (
+          <div
+            className={`relative border border-white/10 overflow-hidden bg-[#0d0d0d] ${state === "done" || state === "fallback" ? "block" : "hidden"}`}
+          >
+            <img
+              key={renderUrl}
+              src={
+                state === "fallback"
+                  ? (fallbackUrl ?? "")
+                  : renderUrl
+              }
+              alt="AI Render"
+              onLoad={handleImgLoad}
+              onError={handleImgError}
+              className="w-full object-contain max-h-[420px]"
+            />
+            {state === "done" && (
+              <div className="absolute top-2 right-2 bg-[#C4964A] text-black text-[8px] tracking-[0.15em] uppercase px-2 py-0.5">
+                AI · 3D
+              </div>
+            )}
+            {state === "fallback" && (
+              <div className="absolute top-2 right-2 bg-white/10 text-white/60 text-[8px] tracking-[0.1em] uppercase px-2 py-0.5">
+                Ảnh gốc
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Generating spinner */}
+        {(state === "generating" || state === "loading") && (
           <div className="border border-white/8 bg-[#111111] p-6 space-y-5">
             <div className="flex items-center gap-3">
               <div className="w-5 h-5 border-2 border-[#C4964A] border-t-transparent rounded-full animate-spin flex-shrink-0" />
               <p className="text-white/60 text-xs">
-                {stepLabel}
+                {state === "generating"
+                  ? "Khởi tạo render pipeline..."
+                  : "Đang tải ảnh 3D từ Pollinations.ai..."}
               </p>
             </div>
-            <div>
-              <div className="flex justify-between mb-2">
-                <p className="text-white/25 text-[9px]">
-                  Đang render...
-                </p>
-                <p className="text-[#C4964A] text-[9px]">
-                  {progress}%
-                </p>
-              </div>
-              <div className="h-1 bg-white/8 w-full rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-[#C4964A] to-[#e8c27a] transition-all duration-1000 rounded-full"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+            <div className="h-1 bg-white/8 w-full rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-[#C4964A] to-[#e8c27a] rounded-full animate-pulse"
+                style={{
+                  width: state === "generating" ? "15%" : "80%",
+                }}
+              />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {RENDER_STEPS.map((s, i) => {
-                const done = i < stepIdx;
-                const active = i === stepIdx;
-                return (
-                  <div
-                    key={s}
-                    className="flex items-center gap-1.5"
-                  >
-                    {done ? (
-                      <CheckCircle2
-                        size={10}
-                        className="text-[#C4964A] flex-shrink-0"
-                      />
-                    ) : active ? (
-                      <div className="w-2.5 h-2.5 border border-[#C4964A] rounded-full animate-pulse flex-shrink-0" />
-                    ) : (
-                      <div className="w-2.5 h-2.5 border border-white/10 rounded-full flex-shrink-0" />
-                    )}
-                    <p
-                      className={`text-[8px] truncate ${done ? "text-white/50" : active ? "text-[#C4964A]" : "text-white/15"}`}
-                    >
-                      {s.replace("...", "")}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="border-t border-white/5 pt-3">
-              <p className="text-white/20 text-[9px] text-center">
-                Powered by Pollinations.ai · Flux model · Có thể
-                mất 30–90 giây
-              </p>
-            </div>
+            <p className="text-white/15 text-[9px] text-center">
+              Có thể mất 20–60 giây · Powered by Pollinations.ai
+            </p>
           </div>
         )}
 
-        {/* Done */}
-        {status === "done" && result && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-[#C4964A]" />
-              <p className="text-white/70 text-xs tracking-wide">
-                Render hoàn tất
-              </p>
-            </div>
-            <div className="relative border border-white/10 overflow-hidden bg-black">
-              <img
-                src={result}
-                alt="AI 3D Render"
-                className="w-full object-contain max-h-[420px]"
+        {/* Fallback notice */}
+        {state === "fallback" && (
+          <div className="border border-yellow-800/40 bg-yellow-900/10 p-4 space-y-3">
+            <div className="flex items-start gap-2">
+              <ImageOff
+                size={14}
+                className="text-yellow-400 flex-shrink-0 mt-0.5"
               />
-              <div className="absolute top-2 right-2 bg-[#C4964A] text-black text-[8px] tracking-[0.15em] uppercase px-2 py-0.5">
-                AI · 3D
+              <div>
+                <p className="text-yellow-300 text-xs mb-1">
+                  AI render không khả dụng lúc này
+                </p>
+                <p className="text-yellow-400/60 text-[10px]">
+                  Đang dùng ảnh gốc của bạn. Bạn vẫn có thể tiếp
+                  tục hoặc thử render lại.
+                </p>
               </div>
             </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => onDone(result)}
-                className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-[#C4964A] text-black text-xs tracking-[0.2em] uppercase hover:bg-[#d4a85a] transition-all duration-300"
-              >
-                <ChevronRight size={14} /> Tiếp tục điền thông
-                tin
-              </button>
-              <button
-                onClick={() => setArOpen(true)}
-                className="px-4 py-3 border border-white/15 text-white/50 hover:border-[#C4964A] hover:text-[#C4964A] transition-all duration-200 flex items-center gap-1.5 text-[9px] tracking-wide uppercase"
-              >
-                <Eye size={13} /> Try AR
-              </button>
-              <button
-                onClick={handleDownload}
-                className="px-4 py-3 border border-white/15 text-white/50 hover:border-white/30 transition-all duration-200"
-              >
-                <Download size={14} />
-              </button>
-            </div>
             <button
-              onClick={run}
-              className="text-white/25 text-[10px] hover:text-white/50 transition-colors flex items-center gap-1"
+              onClick={retry}
+              className="flex items-center gap-1.5 text-[9px] text-yellow-400/70 hover:text-yellow-300 transition-colors"
             >
-              <RotateCcw size={10} /> Render lại (tạo biến thể
-              mới)
+              <RotateCcw size={10} /> Thử render lại
             </button>
           </div>
         )}
 
         {/* Error */}
-        {status === "error" && (
+        {state === "error" && (
           <div className="border border-red-800/40 bg-red-900/10 p-5 space-y-4">
             <div className="flex items-start gap-3">
-              <AlertTriangle
+              <AlertCircle
                 size={15}
                 className="text-red-400 flex-shrink-0 mt-0.5"
               />
@@ -660,39 +579,87 @@ function RenderStep({
                 <p className="text-red-300 text-xs mb-1">
                   Render thất bại
                 </p>
-                <p className="text-red-400/60 text-[10px] leading-relaxed">
+                <p className="text-red-400/60 text-[10px]">
                   {errorMsg}
                 </p>
               </div>
             </div>
             <div className="flex gap-3">
               <button
-                onClick={run}
+                onClick={retry}
                 className="flex items-center gap-1.5 px-4 py-2.5 bg-[#C4964A] text-black text-[9px] tracking-[0.15em] uppercase hover:bg-[#d4a85a] transition-all"
               >
                 <RotateCcw size={11} /> Thử lại
               </button>
-              <button
-                onClick={onBack}
-                className="px-4 py-2.5 border border-white/15 text-white/40 text-[9px] tracking-wide hover:border-white/30 transition-all"
-              >
-                Quay lại
-              </button>
+              {fallbackUrl && (
+                <button
+                  onClick={useFallback}
+                  className="px-4 py-2.5 border border-white/15 text-white/50 text-[9px] tracking-wide hover:border-white/30 transition-all"
+                >
+                  Dùng ảnh gốc
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        {status !== "error" && (
-          <button
-            onClick={onBack}
-            className="text-white/25 text-[10px] hover:text-white/50 transition-colors flex items-center gap-1"
-          >
-            ← Quay lại upload ảnh
-          </button>
-        )}
+        {/* Actions when result is ready */}
+        {(state === "done" || state === "fallback") &&
+          resultUrl && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Sparkles
+                  size={14}
+                  className="text-[#C4964A]"
+                />
+                <p className="text-white/60 text-xs">
+                  {state === "done"
+                    ? "Render hoàn tất"
+                    : "Ảnh gốc đã sẵn sàng"}
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => onDone(resultUrl)}
+                  className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-[#C4964A] text-black text-xs tracking-[0.2em] uppercase hover:bg-[#d4a85a] transition-all duration-300"
+                >
+                  <ChevronRight size={14} /> Tiếp tục điền thông
+                  tin
+                </button>
+                <button
+                  onClick={() => setArOpen(true)}
+                  className="px-4 py-3 border border-white/15 text-white/50 hover:border-[#C4964A] hover:text-[#C4964A] transition-all duration-200 flex items-center gap-1.5 text-[9px] uppercase"
+                >
+                  <Eye size={13} /> Try AR
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className="px-4 py-3 border border-white/15 text-white/50 hover:border-white/30 transition-all duration-200"
+                >
+                  <Download size={14} />
+                </button>
+              </div>
+              {state === "done" && (
+                <button
+                  onClick={retry}
+                  className="text-white/20 text-[9px] hover:text-white/40 transition-colors flex items-center gap-1"
+                >
+                  <RotateCcw size={9} /> Render lại (biến thể
+                  mới)
+                </button>
+              )}
+            </div>
+          )}
+
+        <button
+          onClick={onBack}
+          className="text-white/25 text-[10px] hover:text-white/50 transition-colors flex items-center gap-1"
+        >
+          ← Quay lại upload ảnh
+        </button>
       </div>
 
-      {/* Right: reference images */}
+      {/* Reference images */}
       <div className="lg:col-span-2 space-y-4">
         <p className="text-white/30 text-[9px] tracking-[0.2em] uppercase">
           Ảnh tham chiếu
@@ -721,11 +688,11 @@ function RenderStep({
           })}
         </div>
         {watchDesc && (
-          <div className="border border-white/8 p-3 space-y-1">
-            <p className="text-white/25 text-[9px] tracking-[0.1em] uppercase">
-              Prompt mô tả
+          <div className="border border-white/8 p-3">
+            <p className="text-white/25 text-[9px] tracking-[0.1em] uppercase mb-1">
+              Prompt
             </p>
-            <p className="text-white/40 text-[9px] leading-relaxed line-clamp-4">
+            <p className="text-white/35 text-[9px] leading-relaxed">
               {watchDesc}
             </p>
           </div>
@@ -735,7 +702,7 @@ function RenderStep({
   );
 }
 
-/* ─── Step 3: Watch Info Form ───────────────────────────── */
+/* ─── Step 3: Info Form ─────────────────────────────────── */
 function InfoStep({
   renderedImage,
   onSave,
@@ -759,7 +726,7 @@ function InfoStep({
 
   const canSave = name.trim() && brand.trim();
 
-  if (arOpen) {
+  if (arOpen)
     return (
       <ARTryOn
         watchImage={renderedImage}
@@ -767,13 +734,11 @@ function InfoStep({
         onClose={() => setArOpen(false)}
       />
     );
-  }
 
   const handleSave = () => {
     if (!canSave) return;
     const price =
       parseFloat(priceStr.replace(/[^0-9.]/g, "")) || 0;
-    const size = parseFloat(sizeStr) || 40;
     onSave({
       name: name.trim(),
       brand: brand.trim(),
@@ -784,7 +749,7 @@ function InfoStep({
           ? `${price.toLocaleString("vi-VN")} ₫`
           : "Liên hệ",
       strap,
-      size,
+      size: parseFloat(sizeStr) || 40,
       image: renderedImage,
       originalImages: [],
       tag,
@@ -806,9 +771,8 @@ function InfoStep({
           >
             Thông tin mẫu đồng hồ
           </h2>
-          <p className="text-white/40 text-xs leading-relaxed">
-            Điền thông tin chi tiết. Mẫu đồng hồ sẽ xuất hiện
-            trong trang{" "}
+          <p className="text-white/40 text-xs">
+            Điền thông tin. Mẫu sẽ xuất hiện trong{" "}
             <span className="text-[#C4964A]">Collections</span>{" "}
             khi lưu.
           </p>
@@ -827,7 +791,6 @@ function InfoStep({
               className="w-full bg-[#111111] border border-white/10 focus:border-[#C4964A]/50 text-white/80 px-4 py-3 text-xs placeholder:text-white/20 focus:outline-none transition-colors"
             />
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
@@ -854,7 +817,6 @@ function InfoStep({
               />
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
@@ -882,7 +844,6 @@ function InfoStep({
               />
             </div>
           </div>
-
           <div>
             <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
               Dây đeo
@@ -892,18 +853,13 @@ function InfoStep({
                 <button
                   key={s}
                   onClick={() => setStrap(s)}
-                  className={`px-3 py-1.5 text-[9px] border transition-all duration-150 ${
-                    strap === s
-                      ? "border-[#C4964A] text-[#C4964A] bg-[#C4964A]/10"
-                      : "border-white/12 text-white/35 hover:border-white/25"
-                  }`}
+                  className={`px-3 py-1.5 text-[9px] border transition-all duration-150 ${strap === s ? "border-[#C4964A] text-[#C4964A] bg-[#C4964A]/10" : "border-white/12 text-white/35 hover:border-white/25"}`}
                 >
                   {s}
                 </button>
               ))}
             </div>
           </div>
-
           <div>
             <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
               Tag
@@ -913,18 +869,13 @@ function InfoStep({
                 <button
                   key={t}
                   onClick={() => setTag(t)}
-                  className={`px-3 py-1.5 text-[9px] border transition-all duration-150 ${
-                    tag === t
-                      ? "border-[#C4964A] text-[#C4964A] bg-[#C4964A]/10"
-                      : "border-white/12 text-white/35 hover:border-white/25"
-                  }`}
+                  className={`px-3 py-1.5 text-[9px] border transition-all duration-150 ${tag === t ? "border-[#C4964A] text-[#C4964A] bg-[#C4964A]/10" : "border-white/12 text-white/35 hover:border-white/25"}`}
                 >
                   {t}
                 </button>
               ))}
             </div>
           </div>
-
           <div>
             <label className="text-white/50 text-[9px] tracking-[0.2em] uppercase block mb-2">
               Mô tả
@@ -954,7 +905,6 @@ function InfoStep({
             <Eye size={13} /> Try AR
           </button>
         </div>
-
         <button
           onClick={onBack}
           className="text-white/25 text-[10px] hover:text-white/50 transition-colors flex items-center gap-1"
@@ -963,7 +913,6 @@ function InfoStep({
         </button>
       </div>
 
-      {/* Preview card */}
       <div className="lg:col-span-2 space-y-5">
         <p className="text-white/30 text-[9px] tracking-[0.2em] uppercase">
           Xem trước thẻ Collections
@@ -972,7 +921,7 @@ function InfoStep({
           <div className="relative aspect-square bg-black overflow-hidden">
             <img
               src={renderedImage}
-              alt="3D Render"
+              alt="Render"
               className="w-full h-full object-cover"
             />
             <div className="absolute top-3 left-3">
@@ -1015,13 +964,6 @@ function InfoStep({
             </div>
           </div>
         </div>
-        <div className="border border-[#C4964A]/15 bg-[#C4964A]/5 p-4">
-          <p className="text-[#C4964A]/80 text-[9px] leading-relaxed">
-            Sau khi lưu, mẫu này sẽ xuất hiện ngay trong trang{" "}
-            <span className="text-[#C4964A]">Collections</span>{" "}
-            với đầy đủ tính năng Try AR.
-          </p>
-        </div>
       </div>
     </div>
   );
@@ -1053,8 +995,7 @@ function SuccessStep({
       </h2>
       <p className="text-white/40 text-xs leading-relaxed max-w-sm mb-10">
         <span className="text-white/70">"{watchName}"</span> đã
-        được thêm vào Collections. Bạn có thể tìm thấy và thử AR
-        ngay trong trang Collections.
+        được thêm vào Collections.
       </p>
       <div className="flex gap-4 flex-wrap justify-center">
         <button
@@ -1077,7 +1018,6 @@ function SuccessStep({
 /* ─── Main Page ─────────────────────────────────────────── */
 export function CreatorStudio() {
   const { addWatch } = useWatchStore();
-
   const [step, setStep] = useState(0);
   const [images, setImages] = useState<
     Partial<Record<SlotKey, string>>
@@ -1106,21 +1046,15 @@ export function CreatorStudio() {
       return n;
     });
 
-  const handleRenderDone = (img: string) => {
-    setRendered(img);
-    setStep(2);
-  };
-
   const handleSave = (
     data: Omit<CustomWatch, "id" | "isCustom" | "createdAt">,
   ) => {
-    const watch: CustomWatch = {
+    addWatch({
       ...data,
       id: `custom-${Date.now()}`,
       isCustom: true,
       createdAt: new Date().toISOString(),
-    };
-    addWatch(watch);
+    });
     setSavedName(data.name);
     setStep(3);
   };
@@ -1154,8 +1088,8 @@ export function CreatorStudio() {
           Creator Studio
         </h1>
         <p className="text-white/40 text-xs tracking-wide mt-4 max-w-md mx-auto leading-relaxed">
-          Upload ảnh thật → Mô tả đồng hồ → AI render 3D → Thêm
-          vào Collections → Try AR trên cổ tay.
+          Upload ảnh → Mô tả đồng hồ → AI render 3D →
+          Collections → Try AR.
         </p>
       </div>
 
@@ -1176,7 +1110,10 @@ export function CreatorStudio() {
           <RenderStep
             images={images}
             watchDesc={watchDesc}
-            onDone={handleRenderDone}
+            onDone={(img) => {
+              setRendered(img);
+              setStep(2);
+            }}
             onBack={() => setStep(0)}
           />
         )}
