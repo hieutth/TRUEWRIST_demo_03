@@ -77,9 +77,9 @@ export function MyAccount() {
                 style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: "clamp(1.5rem, 3vw, 2.5rem)", lineHeight: 1.1 }}
                 className="text-white"
               >
-                Nguyen Van Minh
+                Trần Trung Hiếu
               </h1>
-              <p className="text-white/30 text-xs mt-1">minh@truewrist.io · Joined Jan 2026</p>
+              <p className="text-white/30 text-xs mt-1">admin@truewrist.io · Joined Jan 2026</p>
             </div>
           </div>
           <div className="flex gap-6">
